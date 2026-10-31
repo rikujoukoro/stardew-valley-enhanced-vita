@@ -122,6 +122,13 @@ Saves folder. With Steam Cloud on, start the game once afterwards and pick the l
 Open an issue on this repository with the `ERROR:` line from the build window (or, for problems in the game,
 `ux0:data/StardewValley/vita-log.txt`).
 
+## Contributing and license
+
+Contributions are welcome as Pull Requests to this repository. The port's own code (the builder, the patches and
+files in `overlay/`) is © rikujoukoro, all rights reserved: please don't publish modified copies or your own
+releases of it without permission. Ask first, and improvements can go into a release here with credit. Third-party
+parts keep their own licenses (`THIRD_PARTY.md`).
+
 ## For maintainers
 
 - Release files: `StardewVitaBuilder-windows.zip` is this folder (without `.git/`, `work/`, `builder/bin`,
