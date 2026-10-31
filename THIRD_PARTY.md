@@ -19,6 +19,7 @@ ConcernedApe, Sickhead Games or Sony.
 | Component | How | License |
 | --- | --- | --- |
 | ICSharpCode.Decompiler 11.1.0.9782 | NuGet (pinned, `builder/packages.lock.json`) | MIT |
+| SharpCompress 0.50.5 (unpacks the VitaSDK's .xz packages) | NuGet (pinned, `builder/packages.lock.json`) | MIT |
 | FNA (commit 00498b0) | GitHub zip, `tools/sources.json` | Ms-PL; its LzxDecoder: LGPL 2.1 or Ms-PL (`licenses/` in FNA) |
 | SDL2-CS, SDL3-CS, FAudio C#, Theorafile C#, dav1dfile C# (single files FNA compiles) | raw GitHub files, SHA-256 checked | zlib |
 | .NET SDK, Microsoft.NETFramework.ReferenceAssemblies (4.8 too, for the decompiler: `tools/sources.json`) | installed by the player / NuGet | MIT |

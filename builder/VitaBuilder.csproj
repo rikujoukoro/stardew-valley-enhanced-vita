@@ -14,5 +14,7 @@
   <ItemGroup>
     <!-- Same decompiler as ilspycmd 11.1.0.9782, which the patches were made against. -->
     <PackageReference Include="ICSharpCode.Decompiler" Version="[11.1.0.9782]" />
+    <!-- Unpacks the VitaSDK's .xz packages: Windows 10's tar.exe can't (it asks for an xz program it doesn't have). -->
+    <PackageReference Include="SharpCompress" Version="[0.50.5]" />
   </ItemGroup>
 </Project>

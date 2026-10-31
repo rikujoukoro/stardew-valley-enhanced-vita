@@ -12,6 +12,12 @@
           "System.Reflection.Metadata": "9.0.0"
         }
       },
+      "SharpCompress": {
+        "type": "Direct",
+        "requested": "[0.50.5, 0.50.5]",
+        "resolved": "0.50.5",
+        "contentHash": "wAEAxPV67rmS3IlIm+tvGNPJXEtZNqlwkZrwJZAvz0AagZP0qLtT4mM2hk8S+uO0Kx+wYoy/FsADQpHwsN5y3g=="
+      },
       "System.Collections.Immutable": {
         "type": "Transitive",
         "resolved": "9.0.0",

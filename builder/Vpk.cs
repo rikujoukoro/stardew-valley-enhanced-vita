@@ -13,6 +13,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using SharpCompress.Compressors.Xz;
 
 static partial class Program
 {
@@ -197,8 +198,8 @@ static partial class Program
 		Console.WriteLine("   {0}: {1:N0} bytes, SHA-256 {2}", vpk, new FileInfo(vpk).Length, Sha256(File.ReadAllBytes(vpk)));
 	}
 
-	// The VitaSDK packages, checked against tools/sources.json and unpacked with the system's tar (Windows 10 1803
-	// and newer have one that reads .xz).
+	// The VitaSDK packages, checked against tools/sources.json, uncompressed here (Windows 10's tar.exe has no .xz
+	// support of its own) and unpacked with the system's tar (Windows 10 1803 and newer have one).
 	static string FetchVitaSdk(string dir, string cache, string host)
 	{
 		using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(Repo, "tools", "sources.json")));
@@ -231,7 +232,15 @@ static partial class Program
 				throw new BuildException("Unexpected content from " + url);
 			}
 			string file = Path.Combine(cache, Sha256(Encoding.UTF8.GetBytes(url)).Substring(0, 16) + "-" + Path.GetFileName(new Uri(url).AbsolutePath));
-			RunLogged(tar, log, dir, new Dictionary<string, string>(), "-xf", file, "--exclude", ".BUILDINFO", "--exclude", ".MTREE", "--exclude", ".PKGINFO");
+			string plain = Path.Combine(cache, "package.tar");
+			using (var input = new MemoryStream(data))
+			using (var xz = new XZStream(input))
+			using (FileStream output = File.Create(plain))
+			{
+				xz.CopyTo(output);
+			}
+			RunLogged(tar, log, dir, new Dictionary<string, string>(), "-xf", plain, "--exclude", ".BUILDINFO", "--exclude", ".MTREE", "--exclude", ".PKGINFO");
+			File.Delete(plain);
 		}
 		File.WriteAllText(stamp, expected);
 		return dir;
