@@ -460,7 +460,7 @@ static partial class Program
 			+ ".\nSteam: Library > Stardew Valley > Properties > Betas > select \"compatibility\", let it update, then run this again."
 			+ "\nGOG: install the game's compatibility version (1.6.15) in GOG Galaxy."
 			+ (OperatingSystem.IsWindows() ? "" : "\nThe builder needs the game's Windows files: on Linux also set Properties > Compatibility > \"Force the use of a"
-				+ " specific Steam Play compatibility tool\" (Proton); on macOS download them with SteamCMD (see the README)."));
+				+ " specific Steam Play compatibility tool\" (Proton); on macOS download them with DepotDownloader (see the README)."));
 	}
 
 	// The game's assemblies the build reads, copied into work/game: next to them in the game folder, other DLLs

@@ -33,7 +33,7 @@ trophies. You don't have to find these yourself: the builder puts kubridge, NoTr
 | --- | --- | --- |
 | **Windows 10 / 11** | [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (the **SDK**, not only the Runtime) | `StardewVitaBuilder-windows.zip` |
 | Linux (experimental) | .NET 8 SDK | `StardewVitaBuilder-linux-macos.zip` |
-| macOS (experimental) | Docker Desktop (or OrbStack/Colima) and SteamCMD | `StardewVitaBuilder-linux-macos.zip` |
+| macOS (experimental) | Docker Desktop and DepotDownloader (both with Homebrew) | `StardewVitaBuilder-linux-macos.zip` |
 
 Nothing else: the builder downloads the official VitaSDK by itself the first time (~45-70 MB), and the Vita plugins
 from their authors' releases.
@@ -134,24 +134,35 @@ Tested only in a Linux test setup (Debian 11), never on a real Linux PC: please 
 
 ## Installing on macOS (experimental)
 
-Never tried on a Mac: it runs the Linux build in Docker. Please report how it goes.
+It runs the Linux build in Docker. A player built and played it this way (thanks for the steps!); please report
+how it goes on your Mac.
 
-1. Install Docker Desktop (or OrbStack/Colima). On Apple Silicon keep Docker Desktop's *Use Rosetta for x86_64/amd64
-   emulation* on.
-2. Steam for Mac downloads the Mac files, but the builder needs the **Windows** ones. Get them with
-   [SteamCMD](https://developer.valvesoftware.com/wiki/SteamCMD) and your own Steam login:
+1. **Install [Homebrew](https://brew.sh)** if you don't have it, then DepotDownloader and Docker Desktop:
 
    ```
-   steamcmd +@sSteamCmdForcePlatformType windows +force_install_dir ~/StardewWindows +login <your Steam name> +app_update 413150 -beta compatibility validate +quit
+   brew install depotdownloader
+   brew install docker-desktop
    ```
 
-3. Unzip `StardewVitaBuilder-linux-macos.zip`, open Terminal in the `StardewVitaBuilder` folder and run:
+   Open Docker Desktop once and let it start. On Apple Silicon keep its *Use Rosetta for x86_64/amd64 emulation*
+   setting on.
+2. **Download the game's Windows files.** Steam for Mac downloads the Mac files, but the builder needs the
+   **Windows** ones of the compatibility branch. DepotDownloader gets them with your own Steam account:
+
+   ```
+   depotdownloader -app 413150 -depot 413151 -manifest 4848991934266309406 -beta compatibility -username <your Steam name> -dir ~/StardewWindows
+   ```
+
+   It asks for your password (and a Steam Guard code if you use one). You can also pass `-password <password>`,
+   but then it stays in your shell history.
+3. **Build:** unzip `StardewVitaBuilder-linux-macos.zip`, open Terminal in the `StardewVitaBuilder` folder and run:
 
    ```
    bash tools/docker-build.sh --game ~/StardewWindows
    ```
 
-4. Copy everything inside `work/out/ux0` to the Vita's `ux0:` and install `ux0:stardew.vpk`, as on Windows.
+4. Copy everything inside `work/out/ux0` to the Vita's `ux0:` and install `ux0:stardew.vpk`, as on Windows. The
+   plugins and `VITA-PLUGINS.txt` are in `work/out` too (see [First time on this Vita](#first-time-on-this-vita)).
 
 ## Moving saves between PC and Vita
 
