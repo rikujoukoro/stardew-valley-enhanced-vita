@@ -1,94 +1,135 @@
-# Stardew Valley Enhanced for PS Vita (unofficial) — build it yourself
+# Stardew Valley Enhanced
 
-**This repository does not contain Stardew Valley.** It turns your own legal copy (Steam, compatibility branch,
-version 1.6.15) into a PS Vita build on your PC: the builder decompiles your copy, applies the port's changes and
-builds it. No game code, art or audio is distributed here. Not affiliated with ConcernedApe, Sickhead Games or Sony.
-Please buy the game.
+An unofficial PS Vita port of Stardew Valley 1.6, built on your own PC from your own copy of the game.
+
+> **GOG is not supported yet.** I don't own Stardew Valley on GOG, so I can't make or test a GOG version. If you have
+> the game on GOG and want to help add it, please get in touch (open an issue on this repository).
+
+**This repository does not contain Stardew Valley.** The builder takes your own legal copy (Steam) and turns it into
+a PS Vita build on your PC: it decompiles your copy, applies the port's changes and builds it. No game code, art or
+audio is distributed here. Not affiliated with ConcernedApe, Sickhead Games or Sony. Please buy the game.
 
 ## What you get
 
 - Stardew Valley 1.6.15 on the PS Vita: 960x544, controller layout of the official Vita release, 350 MB memory budget
 - Mods menu: tractor, info overlays, chest helper, three extra ring slots, passable crops
 - 12 languages, trophies (with NoTrpDrm), LAN co-op groundwork
+- Your PC saves work on the Vita and back (see [Moving saves](#moving-saves-between-pc-and-vita))
 
-## Requirements
+## What you need
 
-- **PC:** Windows 10 (up to date) or 11, about 5 GB free. **Experimental:** Linux (x86_64, glibc 2.29 or newer:
-  Ubuntu 20.04+, Debian 11+, Fedora, Arch, SteamOS...) and macOS through Docker (below): both were only tested in a
-  Linux test setup (a Debian 11 system and the Docker image on x86_64), never on a real Linux PC or a Mac, so please
-  report how they go.
-- [.NET 8 SDK](https://dotnet.microsoft.com/download) (the SDK, not only the Runtime; a newer SDK works too).
-- This project's release download for your system: **StardewVitaBuilder-windows.zip** (this folder with
-  `vita-toolchain-windows.zip` already inside), or this folder plus `vita-toolchain-linux.zip`. The toolchain zip
-  holds Mono for the Vita, SDL3, vitaGL, FNA3D and FAudio, no game files. No WSL or VitaSDK install needed: the
-  builder downloads the official VitaSDK for your system by itself (~45-70 MB, once).
-- **Vita:** HENkaku/Ensō, VitaShell, `kubridge.skprx` (v0.3.1_hotfix) under `*KERNEL` in `ur0:tai/config.txt`,
-  `libshacccg.suprx` in `ur0:data/`. Optional: NoTrpDrm for real trophies.
+**On the Vita:** HENkaku/Ensō, VitaShell, `kubridge.skprx` (v0.3.1_hotfix) under `*KERNEL` in
+`ur0:tai/config.txt`, and `libshacccg.suprx` in `ur0:data/`. Optional: NoTrpDrm for real trophies.
 
-## 1. Get the right game version
+**On the PC:** Stardew Valley on Steam, about 5 GB of free space, an internet connection for the first build, and:
 
-The builder needs the game's **Windows** files, Steam version 1.6.15 from the **compatibility** branch. It checks
-their SHA-256 (`tools/known-games.json`) and stops on any other version. GOG is not supported yet.
+| System | What to install | Download from Releases |
+| --- | --- | --- |
+| **Windows 10 / 11** | [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (the **SDK**, not only the Runtime) | `StardewVitaBuilder-windows.zip` |
+| Linux (experimental) | .NET 8 SDK | `StardewVitaBuilder-linux-macos.zip` |
+| macOS (experimental) | Docker Desktop (or OrbStack/Colima) and SteamCMD | `StardewVitaBuilder-linux-macos.zip` |
 
-- **Windows:** Steam → Library → Stardew Valley → Properties → Betas → choose **compatibility**, let it update.
-- **Linux** (experimental): the same, and also Properties → Compatibility → *Force the use of a specific Steam Play
-  compatibility tool* (any Proton), so Steam downloads the Windows files. You don't have to play it that way.
-- **macOS** (experimental): Steam for Mac downloads the Mac files, so get the Windows ones with
-  [SteamCMD](https://developer.valvesoftware.com/wiki/SteamCMD) (your own Steam login):
+Nothing else: the builder downloads the official VitaSDK by itself the first time (~45-70 MB).
 
-  ```
-  steamcmd +@sSteamCmdForcePlatformType windows +force_install_dir ~/StardewWindows +login <your Steam name> +app_update 413150 -beta compatibility validate +quit
-  ```
+## Installing on Windows
 
-## 2. Build
+▶ Video: *coming soon* <!-- YouTube link for the Windows install video goes here -->
 
-**Windows:** unzip StardewVitaBuilder-windows.zip somewhere plain and short like `C:\Games` (not in OneDrive:
-Windows often keeps Desktop and Documents there), open the `StardewVitaBuilder` folder and double-click
-**Build.bat**. When it's done, the folder to copy opens by itself.
+1. **Install the .NET 8 SDK** from https://dotnet.microsoft.com/download/dotnet/8.0 (Windows, x64 installer of the
+   SDK). A newer SDK works too.
+2. **Switch Stardew Valley to the compatibility branch:** Steam → Library → right-click Stardew Valley →
+   Properties → Betas → choose **compatibility**, and let it update. The builder checks the game files and stops on
+   any other version.
+3. **Download `StardewVitaBuilder-windows.zip`** from this repository's Releases and unzip it somewhere short and
+   plain, like `C:\Games`. Not on a OneDrive Desktop or Documents folder.
+4. **Double-click `Build.bat`** in the `StardewVitaBuilder` folder. If Windows shows "Windows protected your PC",
+   choose *More info* → *Run anyway*. It finds your Steam game by itself and takes about 4 minutes the first time
+   (2-3 minutes after that). If something goes wrong, the window stays open with an `ERROR:` line saying what.
+5. When it's done, the folder to copy opens by itself (`work\out\ux0`). It is laid out like the Vita's memory card:
+   `data\StardewValley` (~600 MB, with your PC saves in `Saves`) and `stardew.vpk`.
+6. **Copy it to the Vita:** in VitaShell press SELECT for USB (or use FTP) and copy everything inside `ux0` to the
+   Vita's `ux0:`. Let Windows merge the `data` folder with the one already there. If Windows asks to replace a
+   farm's save files, that farm is on both: say yes only if the PC has your latest progress for it.
+7. **Install:** in VitaShell open `ux0:stardew.vpk`, install it, and then you can delete the .vpk. Start the game
+   from its bubble.
 
-**Linux** (experimental): put `vita-toolchain-linux.zip` in this folder and run `bash build.sh` in a terminal.
+Building again later (for example after an update of this repository) is the same: double-click `Build.bat` and copy
+`ux0` again. Saves that are only on the Vita are kept.
 
-**macOS** (experimental, never tried on a Mac): install Docker Desktop (or OrbStack/Colima; on Apple Silicon keep
-Docker Desktop's *Use Rosetta for x86_64/amd64 emulation* on), then in Terminal, in this folder:
+## Installing on Linux (experimental)
 
-```
-bash tools/docker-build.sh --game ~/StardewWindows --toolchain ~/Downloads/vita-toolchain-linux.zip
-```
+Tested only in a Linux test setup (Debian 11), never on a real Linux PC: please report how it goes.
 
-The builder finds your Steam install and the toolchain zip next to it by itself (or add
-`--game "<folder with Stardew Valley.exe>"` and `--toolchain <zip>`, also to Build.bat from a command prompt), then:
-verifies the game, downloads and builds FNA, decompiles the game with a pinned ILSpy, applies `patches/` and
-`overlay/`, builds it, stages `work/out/ux0/data/StardewValley` (your Content with streaming wave banks,
-`Content.pak`) and the VPK's art (icon, LiveArea, manual and trophy pack, drawn from your Content like the title
-screen), then AOT-compiles the game for the Vita, links the eboot and packs `work/out/ux0/stardew.vpk`.
-About 4 minutes the first time, 2-3 minutes after that. On Windows, if the folder's path is long or has letters like
-ç, ğ, ü, the Vita tools work in `C:\ProgramData\StardewVitaBuilder` instead (~1 GB, safe to delete afterwards; or
-pass `--native-dir C:\svb`). Everything else stays in `work/`; delete it to start over.
+1. Install the .NET 8 SDK (your distribution's package or https://dotnet.microsoft.com/download/dotnet/8.0). Needs
+   an x86_64 Linux with glibc 2.29 or newer (Ubuntu 20.04+, Debian 11+, Fedora, Arch, SteamOS...).
+2. In Steam: Stardew Valley → Properties → Betas → **compatibility**, and also Properties → Compatibility → *Force
+   the use of a specific Steam Play compatibility tool* (any Proton), so Steam downloads the game's **Windows** files,
+   which the builder needs. You don't have to play it that way.
+3. Unzip `StardewVitaBuilder-linux-macos.zip` and run `bash build.sh` in the `StardewVitaBuilder` folder. It finds
+   Steam (also the Flatpak and Snap versions) by itself; otherwise add `--game "<folder with Stardew Valley.exe>"`.
+4. Copy everything inside `work/out/ux0` to the Vita's `ux0:` and install `ux0:stardew.vpk`, as on Windows.
 
-## 3. (Optional) Build the VPK in WSL instead
+## Installing on macOS (experimental)
 
-`--no-vpk` stops after step 2's staging. The same VPK can then be made in WSL2 (Ubuntu) with VitaSDK in
-`/usr/local/vitasdk`, `cmake`, `ninja-build`, `python3`, `python3-pil` and `vita-toolchain.tar.xz` extracted into `/`
-(`sudo tar -C / -xJf vita-toolchain.tar.xz`):
+Never tried on a Mac: it runs the Linux build in Docker. Please report how it goes.
 
-```
-sudo bash vpk/build-vpk.sh /mnt/c/<path>/vita-builder/work
-```
+1. Install Docker Desktop (or OrbStack/Colima). On Apple Silicon keep Docker Desktop's *Use Rosetta for x86_64/amd64
+   emulation* on.
+2. Steam for Mac downloads the Mac files, but the builder needs the **Windows** ones. Get them with
+   [SteamCMD](https://developer.valvesoftware.com/wiki/SteamCMD) and your own Steam login:
 
-## 4. Install
+   ```
+   steamcmd +@sSteamCmdForcePlatformType windows +force_install_dir ~/StardewWindows +login <your Steam name> +app_update 413150 -beta compatibility validate +quit
+   ```
 
-`work/out/ux0` is laid out like the memory card: `data/StardewValley/` (~600 MB) and `stardew.vpk`.
+3. Unzip `StardewVitaBuilder-linux-macos.zip`, open Terminal in the `StardewVitaBuilder` folder and run:
 
-1. In VitaShell press SELECT (USB) or connect over FTP, and copy everything inside `work/out/ux0` to `ux0:`
-   (let it merge with the existing `data` folder).
-2. In VitaShell open `ux0:stardew.vpk` and install it; then you can delete the .vpk.
+   ```
+   bash tools/docker-build.sh --game ~/StardewWindows
+   ```
 
-Saves live in `ux0:data/StardewValley/Saves`; the copy and reinstalling the VPK keep them.
+4. Copy everything inside `work/out/ux0` to the Vita's `ux0:` and install `ux0:stardew.vpk`, as on Windows.
+
+## Moving saves between PC and Vita
+
+▶ Video: *coming soon* <!-- YouTube link for the save transfer video goes here -->
+
+Saves are plain folders, one per farm (for example `Farmname_123456789`, with two files inside). Saves from Stardew
+Valley 1.6 on PC load on the Vita, and Vita saves load on PC. **Keep a copy of a save before moving it.**
+
+| Where | Saves folder |
+| --- | --- |
+| Windows | `%APPDATA%\StardewValley\Saves` (paste this into the Explorer address bar) |
+| Linux, macOS | `~/.config/StardewValley/Saves` |
+| PS Vita | `ux0:data/StardewValley/Saves` |
+
+**PC → Vita, automatically:** the builder copies every farm from the PC's Saves folder into its output
+(`work/out/ux0/data/StardewValley/Saves`), so they reach the Vita with the game. Add `--no-saves` to leave them out
+(from a command prompt: `Build.bat --no-saves`), or `--saves "<folder>"` to take them from another folder.
+
+**PC → Vita, by hand** (for example a farm you played further on the PC later): close the game on the PC, connect
+the Vita with VitaShell (SELECT for USB, or FTP), and copy the farm's folder (the whole folder, not only the files
+inside) into `ux0:data/StardewValley/Saves` (create `Saves` if it isn't there yet). Start the game on the Vita and
+load the farm.
+
+**Vita → PC:** the same the other way: copy the farm's folder from `ux0:data/StardewValley/Saves` into the PC's
+Saves folder. With Steam Cloud on, start the game once afterwards and pick the local save if Steam asks.
+
+## Questions and problems
+
+Open an issue on this repository with the `ERROR:` line from the build window (or, for problems in the game,
+`ux0:data/StardewValley/vita-log.txt`).
 
 ## For maintainers
 
-- Release bundle: `StardewVitaBuilder-windows.zip` is this folder (without `work/`, `builder/bin`, `builder/obj`)
-  as `StardewVitaBuilder/` with `vita-toolchain-windows.zip` inside, next to Build.bat.
+- Release files: `StardewVitaBuilder-windows.zip` is this folder (without `.git/`, `work/`, `builder/bin`,
+  `builder/obj`) as `StardewVitaBuilder/` with `vita-toolchain-windows.zip` inside, next to Build.bat;
+  `StardewVitaBuilder-linux-macos.zip` the same with `vita-toolchain-linux.zip`.
+- The builder by hand: `dotnet run --project builder -c Release -- [--game <folder>] [--toolchain <zip>] [--work
+  <folder>] [--native-dir <short ASCII folder>] [--saves <folder> | --no-saves] [--no-vpk]`. On Windows, if the folder's path is long or has letters
+  like ç, ğ, ü, the Vita tools work in `C:\ProgramData\StardewVitaBuilder` (~1 GB, safe to delete afterwards).
+  `--no-vpk` stops after staging; `vpk/build-vpk.sh` then makes the same VPK in WSL with the
+  `vita-toolchain.tar.xz` archive.
 - `tools/make-patches.py` regenerates `patches/` and `overlay/` from the development tree (see its header).
 - `vpk/pack-toolchain-zip.sh windows|linux <zip>` packs the toolchain zips (needs the AOT compiler for that system:
   `vpk/build-mono-crosswin.sh`, built in WSL with mingw-w64, or `vpk/build-mono-crosslinux.sh`, built in a Debian 11

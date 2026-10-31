@@ -115,6 +115,7 @@ static partial class Program
 			}
 			Build(tree, game, outDir, args.Contains("--save-serializers"));
 			Stage(tree, game, fna, GameData(outDir), Path.Combine(outDir, "sce_sys"), Path.Combine(work, "cache"));
+			List<string> farms = args.Contains("--no-saves") ? new List<string>() : CopySaves(Arg(args, "--saves")?.Trim('"'), GameData(outDir));
 			if (vpk)
 			{
 				Step("AOT-compiling for the Vita");
@@ -124,8 +125,14 @@ static partial class Program
 			string ux0 = Path.Combine(outDir, "ux0");
 			Console.WriteLine();
 			Console.WriteLine("Copy everything in this folder to the Vita's ux0: (VitaShell: SELECT for USB or FTP), then install");
-			Console.WriteLine("ux0:stardew.vpk with VitaShell. Your saves in ux0:data/StardewValley/Saves stay as they are.");
+			Console.WriteLine("ux0:stardew.vpk with VitaShell.");
 			Console.WriteLine("   " + (vpk ? ux0 : GameData(outDir)));
+			if (farms.Count > 0)
+			{
+				Console.WriteLine();
+				Console.WriteLine("Your PC saves are in it too (" + string.Join(", ", farms) + "). A farm that is also on the Vita gets");
+				Console.WriteLine("replaced by the PC's copy: if you played it further on the Vita, don't let Windows replace that folder.");
+			}
 			return 0;
 		}
 		catch (BuildException e)
@@ -148,6 +155,34 @@ static partial class Program
 	static string GameData(string outDir)
 	{
 		return Path.Combine(outDir, "ux0", "data", "StardewValley");
+	}
+
+	// The player's PC saves (one folder per farm) into the output's Saves, so one copy brings them to the Vita. The
+	// game keeps them in ApplicationData/StardewValley/Saves: %APPDATA% on Windows, ~/.config on Linux and macOS.
+	static List<string> CopySaves(string from, string gameData)
+	{
+		from ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "StardewValley", "Saves");
+		var farms = new List<string>();
+		if (!Directory.Exists(from))
+		{
+			return farms;
+		}
+		foreach (string farm in Directory.GetDirectories(from).OrderBy(d => d, StringComparer.Ordinal))
+		{
+			string name = Path.GetFileName(farm);
+			// A farm folder holds a save named like the folder and SaveGameInfo; anything else isn't a save.
+			if (!File.Exists(Path.Combine(farm, name)) || !File.Exists(Path.Combine(farm, "SaveGameInfo")))
+			{
+				continue;
+			}
+			CopyTree(farm, Path.Combine(gameData, "Saves", name));
+			farms.Add(name);
+		}
+		if (farms.Count > 0)
+		{
+			Step("Copied your PC saves: " + string.Join(", ", farms));
+		}
+		return farms;
 	}
 
 	// The toolchain zip when it sits next to the builder (this folder or the one above), as in the release bundle.
