@@ -13,7 +13,9 @@ audio is distributed here. Not affiliated with ConcernedApe, Sickhead Games or S
 
 - Stardew Valley 1.6.15 on the PS Vita: 960x544, controller layout of the official Vita release, 350 MB memory budget
 - Mods menu: tractor, info overlays, chest helper, three extra ring slots, passable crops
-- 12 languages, trophies (with NoTrpDrm), LAN co-op groundwork
+- 12 languages, trophies (with NoTrpDrm)
+- Co-op over LAN/IP (new, please report bugs): join a PC host by its IP from the title screen's co-op menu, or host
+  on the Vita (its IP shows in the chat; type `/ip` to see it again). Steam invites don't work, only IP
 - Your PC saves work on the Vita and back (see [Moving saves](#moving-saves-between-pc-and-vita))
 
 ## What you need
