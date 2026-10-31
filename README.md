@@ -17,7 +17,8 @@ audio is distributed here. Not affiliated with ConcernedApe, Sickhead Games or S
 - 12 languages, trophies (with NoTrpDrm)
 - Co-op over LAN/IP (new, please report bugs): join a PC host by its IP from the title screen's co-op menu, or host
   on the Vita (its IP shows in the chat; type `/ip` to see it again). Steam invites don't work, only IP
-- Your PC saves work on the Vita and back (see [Moving saves](#moving-saves-between-pc-and-vita))
+- Your PC saves work on the Vita and back, and saves from the official Vita release can be brought over (see
+  [Moving saves](#moving-saves-between-pc-and-vita))
 
 ## What you need
 
@@ -188,6 +189,17 @@ load the farm.
 
 **Vita → PC:** the same the other way: copy the farm's folder from `ux0:data/StardewValley/Saves` into the PC's
 Saves folder. With Steam Cloud on, start the game once afterwards and pick the local save if Steam asks.
+
+**From the official PS Vita release** (found by a player, [issue #2](https://github.com/rikujoukoro/stardew-valley-enhanced-vita/issues/2)):
+the official release keeps its saves encrypted under `ux0:user/00/savedata/<its title ID>`, so copied as they are
+they don't show up in the game. VitaShell can open them decrypted, and inside they are ordinary farm folders:
+
+1. In VitaShell, go to `ux0:user/00/savedata/`. Find the official Stardew Valley's folder: the player's European copy
+   was `PCSB01226`; other regions have another ID (each farm inside is a folder like `Farmname_123456789`).
+2. Highlight that folder, press △ and choose **Open decrypted**.
+3. Copy the farm's folder from there (the whole folder) into `ux0:data/StardewValley/Saves` (create `Saves` if it
+   isn't there yet). The official release's own save stays where it was.
+4. Start the game and load the farm. The first load of such a save can take a long while; let it finish.
 
 ## Questions and problems
 
