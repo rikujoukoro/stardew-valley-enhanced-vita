@@ -25,6 +25,7 @@ ConcernedApe, Sickhead Games or Sony.
 | .NET SDK, Microsoft.NETFramework.ReferenceAssemblies (4.8 too, for the decompiler: `tools/sources.json`) | installed by the player / NuGet | MIT |
 | VitaSDK 2026.08 for Windows or Linux (`vitasdk-core`: GCC, binutils, newlib, vita-toolchain tools and stubs) | official release, SHA-256 checked (`tools/sources.json`) | GCC/binutils GPL-3.0 with the runtime exception, newlib and the rest various (see vitasdk.org); not redistributed by this project |
 | vitaShaRK, SceShaccCgExt, libmathneon, taihen, kubridge, zlib (VitaSDK packages the eboot links) | same release channel, SHA-256 checked | MIT / zlib / their own (see each package) |
+| kubridge v0.3.1_hotfix (bythos14), NoTrpDrm v1.1 (Rinnegatamante), ShaRKF00D 1.3 (OsirizX): Vita plugins put next to the game in the output | each author's GitHub release, SHA-256 checked (`tools/sources.json` "vitaplugins"); not redistributed by this project | their own (NoTrpDrm: LGPL-3.0) |
 | `mcr.microsoft.com/dotnet/sdk:8.0` (only with `tools/docker-build.sh`) | pulled by Docker | MIT (.NET) and Debian's package licenses |
 
 ## In the toolchain archives (`vita-toolchain-windows.zip`, `vita-toolchain-linux.zip`, `vita-toolchain.tar.xz` for WSL) and the VPK

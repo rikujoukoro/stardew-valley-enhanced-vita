@@ -81,6 +81,26 @@
       }
     ]
   },
+  "vitaplugins": {
+    "comment": "What the Vita needs besides the game, from each author's own GitHub release, put next to the VPK in the output with VITA-PLUGINS.txt (how to install them). libshacccg.suprx is Sony's and can't be shared: ShaRKF00D extracts it on the player's own Vita. Downloaded at build time, not distributed.",
+    "files": [
+      {
+        "url": "https://github.com/bythos14/kubridge/releases/download/v0.3.1_hotfix/kubridge.skprx",
+        "sha256": "93361eafcdb17a5f40ad063ccdb4f1554ed831783559905f8f2bdea2535582d7",
+        "path": "ur0/tai/kubridge.skprx"
+      },
+      {
+        "url": "https://github.com/Rinnegatamante/NoTrpDrm/releases/download/v.1.1/NoTrpDrm.suprx",
+        "sha256": "b1860a0df2b74909bae2ec1d3cd4dd53a3ab0466d4da0d3d7e993eb4b64f8d27",
+        "path": "ux0/tai/NoTrpDrm.suprx"
+      },
+      {
+        "url": "https://github.com/OsirizX/ShaRKF00D/releases/download/1.3/ShaRKF00D.vpk",
+        "sha256": "7c69f2871aa3a29e5bd448dd5dbea1bf4aa0f51c9bf3f8daf49dc06e33869070",
+        "path": "ux0/ShaRKF00D.vpk"
+      }
+    ]
+  },
   "toolchain": {
     "comment": "This project's toolchain zips (vpk/pack-toolchain-zip.sh) from its GitHub release, per system. Until a release has them, pass the zip with --toolchain.",
     "windows": {

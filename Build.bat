@@ -1,5 +1,5 @@
 @echo off
-rem Double-click to build Stardew Valley for the PS Vita from your own Steam copy (see README.md).
+rem Double-click to build Stardew Valley for the PS Vita from your own Steam or GOG copy (see README.md).
 rem Needs the .NET 8 SDK and vita-toolchain-windows.zip in this folder. Options are passed on to the builder.
 setlocal
 cd /d "%~dp0"
@@ -25,6 +25,7 @@ if %errorlevel% neq 0 (
 	pause
 	exit /b 1
 )
-if exist "work\out\ux0" explorer "work\out\ux0"
+rem work\out: ux0 (copy to the Vita), ur0 and VITA-PLUGINS.txt (first-time Vita setup).
+if exist "work\out\ux0" explorer "work\out"
 echo.
 pause

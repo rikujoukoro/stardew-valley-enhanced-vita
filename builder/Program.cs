@@ -130,6 +130,10 @@ static partial class Program
 			{
 				Step("AOT-compiling for the Vita");
 				MakeVpk(work, outDir, fna, toolchain, Arg(args, "--native-dir")?.Trim('"'));
+				VitaPlugins(outDir, Path.Combine(work, "downloads"));
+				// Inputs of vpk/build-vpk.sh (the --no-vpk path), now in the VPK: out keeps only what the player copies.
+				File.Delete(Path.Combine(outDir, "FNA.dll"));
+				Directory.Delete(Path.Combine(outDir, "sce_sys"), true);
 			}
 			Step("Done");
 			string ux0 = Path.Combine(outDir, "ux0");
@@ -137,6 +141,12 @@ static partial class Program
 			Console.WriteLine("Copy everything in this folder to the Vita's ux0: (VitaShell: SELECT for USB or FTP), then install");
 			Console.WriteLine("ux0:stardew.vpk with VitaShell.");
 			Console.WriteLine("   " + (vpk ? ux0 : GameData(outDir)));
+			if (vpk)
+			{
+				Console.WriteLine();
+				Console.WriteLine("First time on this Vita? " + Path.Combine(outDir, PluginNote) + " says how to set up kubridge,");
+				Console.WriteLine("libshacccg (with ShaRKF00D) and NoTrpDrm; their files are next to it.");
+			}
 			if (farms.Count > 0)
 			{
 				Console.WriteLine();
@@ -193,6 +203,66 @@ static partial class Program
 			Step("Copied your PC saves: " + string.Join(", ", farms));
 		}
 		return farms;
+	}
+
+	const string PluginNote = "VITA-PLUGINS.txt";
+
+	// What the Vita needs besides the game (tools/sources.json "vitaplugins"), from each author's release, laid out
+	// like the memory cards as out/ux0 is (kubridge in out/ur0/tai), with a note on setting them up. libshacccg.suprx
+	// is Sony's and can't be shared: ShaRKF00D.vpk extracts it on the Vita.
+	static void VitaPlugins(string outDir, string cache)
+	{
+		Step("Fetching the Vita plugins (kubridge, NoTrpDrm, ShaRKF00D)");
+		using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(Repo, "tools", "sources.json")));
+		foreach (JsonElement file in doc.RootElement.GetProperty("vitaplugins").GetProperty("files").EnumerateArray())
+		{
+			string url = file.GetProperty("url").GetString();
+			byte[] data = Download(url, cache);
+			if (Sha256(data) != file.GetProperty("sha256").GetString())
+			{
+				throw new BuildException("Unexpected content from " + url);
+			}
+			string target = Path.Combine(outDir, file.GetProperty("path").GetString().Replace('/', Path.DirectorySeparatorChar));
+			Directory.CreateDirectory(Path.GetDirectoryName(target));
+			File.WriteAllBytes(target, data);
+		}
+		string[] note =
+		{
+			"Stardew Valley Enhanced: setting up a Vita for the first time",
+			"=============================================================",
+			"",
+			"The game needs kubridge and libshacccg; NoTrpDrm is optional (real trophies). Skip what your Vita",
+			"already has. The files are in this folder, laid out like the Vita's memory: ur0\\... goes to ur0:, ux0\\...",
+			"to ux0: (copying the ux0 folder for the game brings ux0\\tai\\NoTrpDrm.suprx and ux0\\ShaRKF00D.vpk along).",
+			"",
+			"Which config.txt: if ux0:tai/config.txt exists, the Vita reads that one and ignores ur0:tai/config.txt.",
+			"Edit the one your Vita uses (VitaShell: select the file, press Triangle, \"Open in text editor\").",
+			"",
+			"1. kubridge (needed; v0.3.1_hotfix: older ones crash the game at the start)",
+			"   - Copy ur0\\tai\\kubridge.skprx to ur0:tai/ (replace an older kubridge.skprx). VitaShell's USB mode",
+			"     only shows ux0:, so copy it there first and move it to ur0:tai/ in VitaShell, or use FTP.",
+			"   - In config.txt, under *KERNEL, one line (and no other kubridge line):",
+			"         ur0:tai/kubridge.skprx",
+			"",
+			"2. libshacccg.suprx (needed for the graphics; Sony's file, made on your own Vita)",
+			"   - Already there if ur0:data/libshacccg.suprx or ur0:data/external/libshacccg.suprx exists.",
+			"   - Otherwise: install PSM Runtime with its 2.01 update (from the PS Store), install ux0:ShaRKF00D.vpk",
+			"     with VitaShell and start it. It closes by itself when done and leaves ur0:data/libshacccg.suprx.",
+			"",
+			"3. NoTrpDrm (optional: the game's trophies as real trophies)",
+			"   - ux0\\tai\\NoTrpDrm.suprx goes to ux0:tai/NoTrpDrm.suprx.",
+			"   - In config.txt, under *main (add the *main line if there is none):",
+			"         ux0:tai/NoTrpDrm.suprx",
+			"",
+			"Restart the Vita after changing config.txt, then start the game.",
+			"",
+			"Where these come from (each author's own release, checked by SHA-256):",
+			"   kubridge   https://github.com/bythos14/kubridge (bythos14)",
+			"   NoTrpDrm   https://github.com/Rinnegatamante/NoTrpDrm (Rinnegatamante, LGPL-3.0)",
+			"   ShaRKF00D  https://github.com/OsirizX/ShaRKF00D (OsirizX)",
+		};
+		// CRLF: read in Windows' Notepad.
+		File.WriteAllText(Path.Combine(outDir, PluginNote), string.Join("\r\n", note) + "\r\n");
 	}
 
 	// The toolchain zip when it sits next to the builder (this folder or the one above), as in the release bundle.

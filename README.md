@@ -23,7 +23,9 @@ audio is distributed here. Not affiliated with ConcernedApe, Sickhead Games or S
 
 **On the Vita:** HENkaku/Ensō, VitaShell, `kubridge.skprx` (v0.3.1_hotfix) under `*KERNEL` in
 `ur0:tai/config.txt`, and `libshacccg.suprx` in `ur0:data/` (or `ur0:data/external/`). Optional: NoTrpDrm for real
-trophies.
+trophies. You don't have to find these yourself: the builder puts kubridge, NoTrpDrm and ShaRKF00D (which makes
+`libshacccg.suprx` on your own Vita; it is Sony's file and can't be shared) next to the game, with a
+`VITA-PLUGINS.txt` that explains each step (see [First time on this Vita](#first-time-on-this-vita)).
 
 **On the PC:** Stardew Valley on Steam or GOG, about 5 GB of free space, an internet connection for the first build, and:
 
@@ -33,7 +35,8 @@ trophies.
 | Linux (experimental) | .NET 8 SDK | `StardewVitaBuilder-linux-macos.zip` |
 | macOS (experimental) | Docker Desktop (or OrbStack/Colima) and SteamCMD | `StardewVitaBuilder-linux-macos.zip` |
 
-Nothing else: the builder downloads the official VitaSDK by itself the first time (~45-70 MB).
+Nothing else: the builder downloads the official VitaSDK by itself the first time (~45-70 MB), and the Vita plugins
+from their authors' releases.
 
 ## Installing on Windows
 
@@ -43,7 +46,7 @@ Nothing else: the builder downloads the official VitaSDK by itself the first tim
    SDK). A newer SDK works too.
 2. **Switch Stardew Valley to the compatibility version:**
    - Steam: Library → right-click Stardew Valley → Properties → Betas → choose **compatibility**, and let it update.
-   - GOG: install the game's **compatibility** version (1.6.15) in GOG Galaxy.
+   - GOG: install the game's **compatibility** version (1.6.15), see [Installing from GOG](#installing-from-gog).
 
    The builder checks the game files and stops on any other version.
 3. **Download `StardewVitaBuilder-windows.zip`** from this repository's Releases and unzip it somewhere short and
@@ -54,16 +57,67 @@ Nothing else: the builder downloads the official VitaSDK by itself the first tim
    what. If it doesn't find the game (for example, a GOG game installed without Galaxy), copy your game folder (the
    one with `Stardew Valley.exe`) into the `StardewVitaBuilder` folder, name it `Stardew Valley`, and run
    `Build.bat` again.
-5. When it's done, the folder to copy opens by itself (`work\out\ux0`). It is laid out like the Vita's memory card:
-   `data\StardewValley` (~600 MB, with your PC saves in `Saves`) and `stardew.vpk`.
+5. When it's done, `work\out` opens by itself. `ux0` in it is laid out like the Vita's memory card:
+   `data\StardewValley` (~600 MB, with your PC saves in `Saves`), `stardew.vpk`, and the plugin files
+   (`tai\NoTrpDrm.suprx`, `ShaRKF00D.vpk`). Next to it are `ur0\tai\kubridge.skprx` and `VITA-PLUGINS.txt`.
 6. **Copy it to the Vita:** in VitaShell press SELECT for USB (or use FTP) and copy everything inside `ux0` to the
    Vita's `ux0:`. Let Windows merge the `data` folder with the one already there. If Windows asks to replace a
    farm's save files, that farm is on both: say yes only if the PC has your latest progress for it.
-7. **Install:** in VitaShell open `ux0:stardew.vpk`, install it, and then you can delete the .vpk. Start the game
-   from its bubble.
+7. **Install:** in VitaShell open `ux0:stardew.vpk`, install it, and then you can delete the .vpk.
+8. **First time on this Vita?** Set up kubridge and libshacccg (and NoTrpDrm if you like) as `VITA-PLUGINS.txt`
+   says, then restart the Vita. Start the game from its bubble.
 
 Building again later (for example after an update of this repository) is the same: double-click `Build.bat` and copy
 `ux0` again. Saves that are only on the Vita are kept.
+
+## Installing from GOG
+
+The GOG version needs its **1.6.15 compatibility** build (GOG's .NET Framework/XNA version of the game, the same one
+Steam calls the *compatibility* branch). The builder recognizes it by its file hashes and stops on any other GOG
+build. Everything after step 2 is the same as on Steam: the GOG files give the same Vita build, byte for byte.
+
+1. **Install the .NET 8 SDK**, as in step 1 above.
+2. **Get the compatibility build:** in GOG Galaxy open Stardew Valley, click the settings icon next to *Play* →
+   *Manage installation* → *Configure*, choose the **compatibility** version (1.6.15) instead of the default one, and
+   let it install. (The menu names can differ between Galaxy versions; if your Galaxy doesn't offer it, GOG's
+   website may have an offline installer for that version in your game library.)
+3. **Download `StardewVitaBuilder-windows.zip`** and unzip it, as in step 3 above.
+4. **Double-click `Build.bat`.** It finds a game installed with GOG Galaxy by itself (it reads the folder Galaxy
+   registered). If it doesn't (an offline installer, a moved folder, a copy from another PC), copy the game's
+   folder, the one with `Stardew Valley.exe` and `Content`, into the `StardewVitaBuilder` folder, name it
+   `Stardew Valley`, and run `Build.bat` again. You can also point at it yourself:
+   `Build.bat --game "D:\GOG Games\Stardew Valley"`.
+5. The window should say `Verified: GOG 1.6.15 compatibility`. Then continue with steps 5-8 above.
+
+If it says your files don't match: the folder has GOG's default (.NET 6) version, or a mix of both. A
+compatibility folder has a `Stardew Valley.exe` of about 6 MB. Files left over from the other version
+(`Stardew Valley.dll`, `*.runtimeconfig.json`, many `System.*.dll`) don't stop the build: the builder only reads the
+files it checks and `Content`.
+
+GOG saves are the same as Steam's (same folder, same format), so [Moving saves](#moving-saves-between-pc-and-vita)
+works the same way. Co-op on the Vita is over IP only, so GOG Galaxy invites don't work either.
+
+## First time on this Vita
+
+The game needs two things a fresh HENkaku Vita may not have; NoTrpDrm is optional. The builder downloads them from
+their authors' own releases (checked by SHA-256) and puts them in `work\out`, laid out like the Vita's memory:
+`ux0\...` goes to `ux0:`, `ur0\...` to `ur0:`. `VITA-PLUGINS.txt` there has the same steps.
+
+First, which `config.txt`: if `ux0:tai/config.txt` exists, the Vita reads that one and ignores
+`ur0:tai/config.txt`. Edit the one your Vita uses (in VitaShell: select it, press Triangle, *Open in text editor*).
+
+1. **kubridge** (needed, v0.3.1_hotfix; older ones crash the game at the start): copy
+   `ur0\tai\kubridge.skprx` to `ur0:tai/`, replacing an older one. VitaShell's USB mode only shows `ux0:`, so copy
+   it to `ux0:` first and move it to `ur0:tai/` in VitaShell, or use FTP. In `config.txt`, under `*KERNEL`, keep one
+   line `ur0:tai/kubridge.skprx` and no other kubridge line.
+2. **libshacccg.suprx** (needed for the graphics): you already have it if `ur0:data/libshacccg.suprx` or
+   `ur0:data/external/libshacccg.suprx` exists. Otherwise install *PSM Runtime* with its 2.01 update from the PS
+   Store, install `ux0:ShaRKF00D.vpk` with VitaShell and start it: it closes by itself when done and leaves
+   `ur0:data/libshacccg.suprx`.
+3. **NoTrpDrm** (optional, real trophies): `ux0\tai\NoTrpDrm.suprx` arrives at `ux0:tai/` with the rest of `ux0`.
+   In `config.txt`, under `*main` (add that line if it isn't there), add `ux0:tai/NoTrpDrm.suprx`.
+
+Restart the Vita after changing `config.txt`.
 
 ## Installing on Linux (experimental)
 
