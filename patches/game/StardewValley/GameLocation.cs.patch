@@ -1,5 +1,5 @@
 diff --git a/StardewValley/GameLocation.cs b/StardewValley/GameLocation.cs
-index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef787ad160f 100644
+index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1785257f6 100644
 --- a/StardewValley/GameLocation.cs
 +++ b/StardewValley/GameLocation.cs
 @@ -212,7 +212,186 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
@@ -1549,16 +1549,19 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
 -		foreach (Building building in buildings)
 +		// Port: no enumerator for the locations without buildings (nearly all of them, every tick).
 +		if (buildings.Count > 0)
-+		{
+ 		{
+-			building.updateWhenFarmNotCurrentLocation(time);
 +			foreach (Building building in buildings)
 +			{
 +				building.updateWhenFarmNotCurrentLocation(time);
 +			}
-+		}
+ 		}
+-		if (!Game1.currentLocation.Equals(this) && animals.Length > 0)
 +		if (animals.Length > 0 && !Game1.currentLocation.Equals(this))
  		{
--			building.updateWhenFarmNotCurrentLocation(time);
-+			Building containingBuilding = ParentBuilding;
+ 			Building containingBuilding = ParentBuilding;
+-			FarmAnimal[] array = animals.Values.ToArray();
+-			for (int j = 0; j < array.Length; j++)
 +			// Port: a reused snapshot instead of a new array per location with animals every tick (an
 +			// animal update can move it to another location, so the loop can't run over animals itself).
 +			List<FarmAnimal> snapshot = _animalUpdateSnapshot ?? new List<FarmAnimal>();
@@ -1630,14 +1633,10 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
 +			}
 +			_frameUpdateScanTick = Game1.ticks;
 +			_frameUpdateScanCount = count;
- 		}
--		if (!Game1.currentLocation.Equals(this) && animals.Length > 0)
++		}
 +		objects.Lock();
 +		for (int i = 0; i < _frameUpdateObjects.Count; i++)
- 		{
--			Building containingBuilding = ParentBuilding;
--			FarmAnimal[] array = animals.Values.ToArray();
--			for (int j = 0; j < array.Length; j++)
++		{
 +			Object value = _frameUpdateObjects[i];
 +			// Picked up or replaced since the scan: not this location's any more (its update could add its light back).
 +			if (objects.TryGetValue(value.TileLocation, out Object current) && current == value)
@@ -1886,7 +1885,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  				{
  					drawWaterTile(b, x, y);
  				}
-@@ -15199,21 +16097,331 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15199,21 +16097,339 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  
  	public void drawWaterTile(SpriteBatch b, int x, int y, Color color)
  	{
@@ -1898,6 +1897,14 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
 +		bool num = y >= mapH - 1 || !wt[x, y + 1].isWater;
 +		bool topY = y <= 0 || !wt[x, y - 1].isWater;
 +		int intWaterPos = (int)waterPosition;
++		if (Game1.graphics.GraphicsDevice.VitaBackBufferScale == 0.5f)
++		{
++			// Port: at the far camera the world is drawn straight to the screen at half a pixel per world pixel
++			// (Game1.VitaDirectWorldScale). An odd scroll put the water's texels half a pixel off, so each step
++			// picked the other half of its rows and the water flickered, most visibly in the row under piers and
++			// bridges. Even steps keep it on whole pixels, as Game1.VitaDirectCameraCoordinate does the camera.
++			intWaterPos &= ~1;
++		}
 +		b.Draw(Game1.mouseCursors, Game1.GlobalToLocal(Game1.viewport, new Vector2(x * 64, y * 64 - ((!topY) ? intWaterPos : 0))), new Microsoft.Xna.Framework.Rectangle(waterAnimationIndex * 64, 2064 + (((x + y) % 2 != 0) ? ((!waterTileFlip) ? 128 : 0) : (waterTileFlip ? 128 : 0)) + (topY ? intWaterPos : 0), 64, 64 + (topY ? (-intWaterPos) : 0)), color, 0f, Vector2.Zero, 1f, SpriteEffects.None, 0.56f);
  		if (num)
  		{
@@ -2223,7 +2230,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  		{
  			foreach (Building building in buildings)
  			{
-@@ -15229,18 +16437,47 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15229,18 +16445,47 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  				}
  			}
  		}
@@ -2279,7 +2286,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  					}
  				}
  			}
-@@ -15249,6 +16486,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15249,6 +16494,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  		{
  			return;
  		}
@@ -2290,7 +2297,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  		Furniture.isDrawingLocationFurniture = true;
  		foreach (Furniture f in furniture)
  		{
-@@ -15320,13 +16561,20 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15320,13 +16569,20 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			}
  			if (d.itemId.Value != null)
  			{
@@ -2312,7 +2319,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  					Microsoft.Xna.Framework.Rectangle sourceRect = ((d.debrisType.Value == Debris.DebrisType.RESOURCE) ? itemData.GetSourceRect(chunk4.randomOffset) : itemData.GetSourceRect());
  					SpriteEffects spriteEffect = ((d.floppingFish.Value && chunk4.bounces % 2 == 0) ? SpriteEffects.FlipHorizontally : SpriteEffects.None);
  					b.Draw(texture, Utility.snapDrawPosition(Game1.GlobalToLocal(Game1.viewport, position5)), sourceRect, Color.White, 0f, Vector2.Zero, scale, spriteEffect, ((float)(d.chunkFinalYLevel + 32) + position5.X / 10000f) / 10000f);
-@@ -15335,11 +16583,17 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15335,11 +16591,17 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			}
  			else
  			{
@@ -2332,7 +2339,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  					b.Draw(Game1.debrisSpriteSheet, position6, sourceRect2, d.chunksColor.Value, 0f, Vector2.Zero, 4f * d.scale.Value, SpriteEffects.None, drawLayer);
  				}
  			}
-@@ -15475,16 +16729,46 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15475,16 +16737,46 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  		drawDebris(b);
  		if ((!Game1.eventUp || (currentEvent != null && currentEvent.showGroundObjects)) && objects.Length > 0)
  		{
@@ -2386,7 +2393,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  					}
  				}
  			}
-@@ -15561,6 +16845,42 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15561,6 +16853,42 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  
  	public virtual void drawAboveFrontLayer(SpriteBatch b)
  	{
@@ -2429,7 +2436,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  		Vector2 tile = default;
  		for (int y = Game1.viewport.Y / 64 - 1; y < (Game1.viewport.Y + Game1.viewport.Height) / 64 + 7; y++)
  		{
-@@ -15821,7 +17141,15 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15821,7 +17149,15 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			try
  			{
  				tilesheet.ImageSource = GetSeasonalTilesheetName(tilesheet.ImageSource, GetSeasonKey());
@@ -2446,7 +2453,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  			}
  			catch (Exception exception)
  			{
-@@ -15829,7 +17157,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15829,7 +17165,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  				tilesheet.ImageSource = prevImageSource;
  			}
  		}
@@ -2458,7 +2465,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  	}
  
  	public static string GetSeasonalTilesheetName(string sheet_path, string current_season)
-@@ -16816,7 +18147,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -16816,7 +18155,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			return true;
  		case 34:
  		{
@@ -2467,7 +2474,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  			{
  				Game1.log.Warn(string.Format("Location '{0}' ignored path tile index 34 (spawn tree) at position {1} because the tile has no '{2}' tile property.", NameOrUniqueName, tile, "SpawnTree"));
  				break;
-@@ -16937,7 +18268,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -16937,7 +18276,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			for (int layerWidth = buildingLayer.LayerWidth; x < layerWidth; x++)
  			{
  				Tile tile = buildingLayer.Tiles[x, y];
@@ -2476,7 +2483,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  				{
  					continue;
  				}
-@@ -17067,6 +18398,11 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -17067,6 +18406,11 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  
  	protected void adjustMapLightPropertiesForLamp(int tile, int x, int y, string layer)
  	{
@@ -2488,7 +2495,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef7
  		string tilesheet = getTileSheetIDAt(x, y, layer);
  		if (isFarmBuildingInterior())
  		{
-@@ -17208,6 +18544,12 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -17208,6 +18552,12 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  
  	public bool Equals(GameLocation other)
  	{
