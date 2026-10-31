@@ -1,0 +1,63 @@
+diff --git a/StardewValley.Menus/TextBox.cs b/StardewValley.Menus/TextBox.cs
+index a9c46e68cd96622e41b36de1b3b749d3b6b1eaf1..d0ab8f6f1c739d37ee5950bf2e917139078d9f4f 100644
+--- a/StardewValley.Menus/TextBox.cs
++++ b/StardewValley.Menus/TextBox.cs
+@@ -1,7 +1,6 @@
+ using Microsoft.Xna.Framework;
+ using Microsoft.Xna.Framework.Graphics;
+ using Microsoft.Xna.Framework.Input;
+-using StardewValley.SDKs.Steam;
+ 
+ namespace StardewValley.Menus;
+ 
+@@ -87,10 +86,6 @@ public class TextBox : IKeyboardSubscriber
+ 				return;
+ 			}
+ 			_showKeyboard = false;
+-			if (Program.sdk is SteamHelper { active: not false } steamHelper)
+-			{
+-				steamHelper.CancelKeyboard();
+-			}
+ 			if (Game1.keyboardDispatcher.Subscriber == this)
+ 			{
+ 				Game1.keyboardDispatcher.Subscriber = null;
+@@ -124,6 +119,12 @@ public class TextBox : IKeyboardSubscriber
+ 
+ 	public void Update()
+ 	{
++		if (VitaPlatform.IsVita && TextInputEXT.IsScreenKeyboardShown())
++		{
++			// Port: the system keyboard is open; the stick still moves the cursor, which must not take
++			// the focus from the box the text is for.
++			return;
++		}
+ 		Point mousePoint = new Point(Game1.getMouseX(), Game1.getMouseY());
+ 		if (new Rectangle(X, Y, Width, Height).Contains(mousePoint))
+ 		{
+@@ -135,12 +136,25 @@ public class TextBox : IKeyboardSubscriber
+ 		}
+ 		if (_showKeyboard)
+ 		{
+-			if (Game1.options.gamepadControls && !Game1.lastCursorMotionWasMouse)
++			if (Game1.options.gamepadControls && !Game1.lastCursorMotionWasMouse && !VitaPlatform.IsVita)
+ 			{
+ 				Game1.showTextEntry(this);
+ 			}
+ 			_showKeyboard = false;
+ 		}
++		if (VitaPlatform.IsVita)
++		{
++			// Port: Cross on a text box opens the Vita's system keyboard (through SDL's text input), which
++			// types every language the game has. Its text replaces the box's.
++			// Menus call Update from their click handlers (character creation) or every frame; either way
++			// oldPadState still holds the previous frame here.
++			bool crossPressed = Game1.input.GetGamePadState().IsButtonDown(Buttons.A) && !Game1.oldPadState.IsButtonDown(Buttons.A);
++			if (Selected && crossPressed && Game1.keyboardDispatcher.Subscriber == this)
++			{
++				Text = "";
++				KeyboardInput.SetTextInputActive(active: true);
++			}
++		}
+ 	}
+ 
+ 	public virtual void Draw(SpriteBatch spriteBatch, bool drawShadow = true)

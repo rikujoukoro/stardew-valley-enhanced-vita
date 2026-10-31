@@ -1,0 +1,3 @@
+# Every file byte for byte as tested: no line-ending conversion on any system (the shell scripts are LF,
+# Build.bat CRLF, and the patches and overlay must reach the builder unchanged).
+* -text

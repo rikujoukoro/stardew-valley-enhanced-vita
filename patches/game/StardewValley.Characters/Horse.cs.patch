@@ -1,0 +1,13 @@
+diff --git a/StardewValley.Characters/Horse.cs b/StardewValley.Characters/Horse.cs
+index a69b38f851a3480b06f0ab219b9bf81cf629a3ca..faf723cc0d77849d733a00ccde7cd1c81cf91abb 100644
+--- a/StardewValley.Characters/Horse.cs
++++ b/StardewValley.Characters/Horse.cs
+@@ -719,6 +719,8 @@ public class Horse : NPC
+ 
+ 	public override void draw(SpriteBatch b)
+ 	{
++		if (VitaTractorRenderer.Draw(this, b))
++			return;
+ 		flip = FacingDirection == 3;
+ 		Sprite.UpdateSourceRect();
+ 		base.draw(b);

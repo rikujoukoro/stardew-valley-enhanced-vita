@@ -1,0 +1,67 @@
+diff --git a/StardewValley.Locations/MineShaft.cs b/StardewValley.Locations/MineShaft.cs
+index e4cb51c29dd84eade8965ec4f10a46ec2da8e441..dc4ad3afe416030820bbbe13f49a72070f5502fa 100644
+--- a/StardewValley.Locations/MineShaft.cs
++++ b/StardewValley.Locations/MineShaft.cs
+@@ -1083,8 +1083,16 @@ public class MineShaft : GameLocation
+ 			c = Color.PaleGoldenrod * 0.33f;
+ 			break;
+ 		}
++		int vpX = Game1.viewport.X;
++		int vpY = Game1.viewport.Y;
++		int vpRight = vpX + Game1.viewport.Width;
++		int vpBottom = vpY + Game1.viewport.Height;
+ 		foreach (Vector2 v in lightGlows)
+ 		{
++			if (v.X < vpX - 160 || v.X > vpRight + 160 || v.Y < vpY - 160 || v.Y > vpBottom + 160)
++			{
++				continue;
++			}
+ 			if (rainbowLights.Value)
+ 			{
+ 				switch ((int)(v.X / 64f + v.Y / 64f) % 4)
+@@ -3246,17 +3254,29 @@ public class MineShaft : GameLocation
+ 	public override void drawAboveAlwaysFrontLayer(SpriteBatch b)
+ 	{
+ 		base.drawAboveAlwaysFrontLayer(b);
+-		b.End();
+-		b.Begin(SpriteSortMode.FrontToBack, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+-		foreach (NPC character in characters)
++		bool hasMonster = false;
++		for (int i = 0; i < characters.Count; i++)
+ 		{
+-			if (character is Monster monster)
++			if (characters[i] is Monster)
+ 			{
+-				monster.drawAboveAllLayers(b);
++				hasMonster = true;
++				break;
+ 			}
+ 		}
+-		b.End();
+-		b.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
++		if (hasMonster)
++		{
++			b.End();
++			b.Begin(SpriteSortMode.FrontToBack, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
++			for (int i = 0; i < characters.Count; i++)
++			{
++				if (characters[i] is Monster monster)
++				{
++					monster.drawAboveAllLayers(b);
++				}
++			}
++			b.End();
++			b.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
++		}
+ 		if (fogAlpha > 0f || ambientFog)
+ 		{
+ 			Vector2 v = default;
+@@ -4903,7 +4923,7 @@ public class MineShaft : GameLocation
+ 	{
+ 		foreach (MineShaft mine in activeMines)
+ 		{
+-			if (mine.farmers.Any())
++			if (mine.farmers.Count > 0)
+ 			{
+ 				mine.UpdateWhenCurrentLocation(time);
+ 			}

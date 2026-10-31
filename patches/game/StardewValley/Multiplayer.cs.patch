@@ -1,0 +1,52 @@
+diff --git a/StardewValley/Multiplayer.cs b/StardewValley/Multiplayer.cs
+index 3df9894825db7d369c872d05f3e4b89beafe2170..f2713f00d4f30a976248b6bf4a35e19dbbe14377 100644
+--- a/StardewValley/Multiplayer.cs
++++ b/StardewValley/Multiplayer.cs
+@@ -131,11 +131,11 @@ public class Multiplayer
+ 
+ 	public int defaultInterpolationTicks = 15;
+ 
+-	public int farmerDeltaBroadcastPeriod = 3;
++	public int farmerDeltaBroadcastPeriod = 4;
+ 
+-	public int locationDeltaBroadcastPeriod = 3;
++	public int locationDeltaBroadcastPeriod = 4;
+ 
+-	public int worldStateDeltaBroadcastPeriod = 3;
++	public int worldStateDeltaBroadcastPeriod = 4;
+ 
+ 	public int playerLimit = 4;
+ 
+@@ -376,7 +376,7 @@ public class Multiplayer
+ 		{
+ 			foreach (GameLocation location in activeLocations())
+ 			{
+-				if (!(location.Root == null) && location.Root.Dirty)
++				if (location.Root != null && location.Root.Dirty)
+ 				{
+ 					broadcastLocationDelta(location);
+ 				}
+@@ -1076,7 +1076,7 @@ public class Multiplayer
+ 			if (Game1.client != null)
+ 			{
+ 				message = message + " Ping: " + Game1.client.GetPingToHost().ToString("0.#");
+-				message += ((Game1.client is LidgrenClient) ? " ip" : " friend/invite");
++				message += " friend/invite";
+ 			}
+ 			Program.WriteLog(Program.LogType.Disconnect, message, append: true);
+ 		}
+@@ -1724,12 +1724,14 @@ public class Multiplayer
+ 	{
+ 		Game1.server = new GameServer(local_multiplayer: true);
+ 		Game1.server.startServer();
++		Game1.ShowHostIpInChat();
+ 	}
+ 
+ 	public virtual void StartServer()
+ 	{
+ 		Game1.server = new GameServer();
+ 		Game1.server.startServer();
++		Game1.ShowHostIpInChat();
+ 	}
+ 
+ 	public virtual void Disconnect(DisconnectType disconnectType)

@@ -1,0 +1,23 @@
+diff --git a/StardewValley/DebugCommands.cs b/StardewValley/DebugCommands.cs
+index 40c41391ffe70eccf8cf484c734fa0b24174d24e..5532b40b45fe5f30dede183899ba475c921b47b1 100644
+--- a/StardewValley/DebugCommands.cs
++++ b/StardewValley/DebugCommands.cs
+@@ -4644,17 +4644,7 @@ public static class DebugCommands
+ 				LogArgError(log, command, error);
+ 				return;
+ 			}
+-			FarmhandMenu farmhandMenu = new FarmhandMenu(Game1.multiplayer.InitClient(new LidgrenClient(address)));
+-			if (Game1.activeClickableMenu is TitleMenu)
+-			{
+-				TitleMenu.subMenu = farmhandMenu;
+-				return;
+-			}
+-			Game1.ExitToTitle(() =>
+-			{
+-				(Game1.activeClickableMenu as TitleMenu).skipToTitleButtons();
+-				TitleMenu.subMenu = farmhandMenu;
+-			});
++			log.Error("Joining '" + address + "' is not supported: this single-player build has no network transport.");
+ 		}
+ 
+ 		public static void ToggleNetCompression(string[] command, IGameLogger log)

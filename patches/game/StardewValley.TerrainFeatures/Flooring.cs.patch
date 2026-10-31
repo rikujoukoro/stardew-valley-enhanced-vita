@@ -1,0 +1,34 @@
+diff --git a/StardewValley.TerrainFeatures/Flooring.cs b/StardewValley.TerrainFeatures/Flooring.cs
+index c59ee6d555bc1f606d4df9b44c7f8d8956259234..79647c681dd9e27e9c1a6d1957f58fde657bd63a 100644
+--- a/StardewValley.TerrainFeatures/Flooring.cs
++++ b/StardewValley.TerrainFeatures/Flooring.cs
+@@ -168,12 +168,28 @@ public class Flooring : TerrainFeature
+ 		return _FloorPathItemLookup;
+ 	}
+ 
++	/// <summary>Port: the last <see cref="GetData" /> result with the id string and data table it came from. draw() asks five or six times per floor tile per frame, each a string-keyed dictionary lookup; the cache holds only while the id is the same string instance and the table is the same object, so a type change (or reloaded data) looks it up again.</summary>
++	private FloorPathData _cachedData;
++
++	private string _cachedDataId;
++
++	private IDictionary<string, FloorPathData> _cachedDataSource;
++
+ 	public FloorPathData GetData()
+ 	{
+-		if (!TryGetData(whichFloor.Value, out var data))
++		string id = whichFloor.Value;
++		IDictionary<string, FloorPathData> source = Game1.floorPathData;
++		if (_cachedData != null && (object)id == _cachedDataId && source == _cachedDataSource)
++		{
++			return _cachedData;
++		}
++		if (!TryGetData(id, out var data))
+ 		{
+ 			return null;
+ 		}
++		_cachedData = data;
++		_cachedDataId = id;
++		_cachedDataSource = source;
+ 		return data;
+ 	}
+ 

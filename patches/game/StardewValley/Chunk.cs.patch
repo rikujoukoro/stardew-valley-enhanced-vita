@@ -1,0 +1,14 @@
+diff --git a/StardewValley/Chunk.cs b/StardewValley/Chunk.cs
+index 544e5b464e8f7f13448b30434fc1fcd0afae2f2d..38fc1d303335338618da51847a5a148cafff07ee 100644
+--- a/StardewValley/Chunk.cs
++++ b/StardewValley/Chunk.cs
+@@ -27,6 +27,9 @@ public class Chunk : INetObject<NetFields>
+ 	[XmlIgnore]
+ 	public int bounces;
+ 
++	[XmlIgnore]
++	public int stack = 1;
++
+ 	[XmlIgnore]
+ 	public float bob;
+ 

@@ -1,0 +1,59 @@
+diff --git a/StardewValley/Item.cs b/StardewValley/Item.cs
+index 8da781a22cdeeff930001af89b37d6584a9caa7d..bc1dbb3b407f238986fc2cc86143d46923d4995b 100644
+--- a/StardewValley/Item.cs
++++ b/StardewValley/Item.cs
+@@ -64,6 +64,21 @@ public abstract class Item : IComparable, INetObject<NetFields>, ISalable, IHave
+ 	[XmlIgnore]
+ 	protected string _qualifiedItemId;
+ 
++	[XmlIgnore]
++	protected ParsedItemData _parsedItemData;
++
++	[XmlIgnore]
++	protected sbyte _isTapperCache = -1;
++
++	public ParsedItemData GetParsedData()
++	{
++		if (_parsedItemData == null)
++		{
++			_parsedItemData = ItemRegistry.GetDataOrErrorItem(QualifiedItemId);
++		}
++		return _parsedItemData;
++	}
++
+ 	public bool specialItem;
+ 
+ 	[XmlElement("isRecipe")]
+@@ -162,6 +177,7 @@ public abstract class Item : IComparable, INetObject<NetFields>, ISalable, IHave
+ 		{
+ 			itemId.Value = value;
+ 			_qualifiedItemId = null;
++			_parsedItemData = null;
+ 		}
+ 	}
+ 
+@@ -254,6 +270,7 @@ public abstract class Item : IComparable, INetObject<NetFields>, ISalable, IHave
+ 	public void MarkContextTagsDirty()
+ 	{
+ 		_contextTagsDirty = true;
++		_isTapperCache = -1;
+ 	}
+ 
+ 	public HashSet<string> GetContextTags()
+@@ -328,6 +345,7 @@ public abstract class Item : IComparable, INetObject<NetFields>, ISalable, IHave
+ 		itemId.fieldChangeVisibleEvent += delegate
+ 		{
+ 			_qualifiedItemId = null;
++			_parsedItemData = null;
+ 			MarkContextTagsDirty();
+ 		};
+ 		netName.fieldChangeVisibleEvent += (NetString field, string oldValue, string newValue) =>
+@@ -428,7 +446,7 @@ public abstract class Item : IComparable, INetObject<NetFields>, ISalable, IHave
+ 	public virtual void DrawMenuIcons(SpriteBatch sb, Vector2 location, float scale_size, float transparency, float layer_depth, StackDrawType drawStackNumber, Color color)
+ 	{
+ 		int drawnStack = Stack;
+-		bool shouldDrawStackNumber = ((drawStackNumber == StackDrawType.Draw && maximumStackSize() > 1 && drawnStack > 1) || drawStackNumber == StackDrawType.Draw_OneInclusive) && (double)scale_size > 0.3 && drawnStack != int.MaxValue;
++		bool shouldDrawStackNumber = ((drawStackNumber == StackDrawType.Draw && drawnStack > 1 && maximumStackSize() > 1) || drawStackNumber == StackDrawType.Draw_OneInclusive) && (double)scale_size > 0.3 && drawnStack != int.MaxValue;
+ 		if (IsRecipe)
+ 		{
+ 			shouldDrawStackNumber = false;

@@ -1,0 +1,511 @@
+diff --git a/StardewValley/FarmerRenderer.cs b/StardewValley/FarmerRenderer.cs
+index 5c77d73580d9bd822e39240f87ec54b61996db3a..23435afba8e6ec5124e808e35acc36beb726b0c0 100644
+--- a/StardewValley/FarmerRenderer.cs
++++ b/StardewValley/FarmerRenderer.cs
+@@ -117,6 +117,24 @@ public class FarmerRenderer : INetObject<NetFields>
+ 
+ 	public static Dictionary<string, Dictionary<int, List<int>>> recolorOffsets;
+ 
++	private static Dictionary<string, Color[]> _cachedSourcePixels;
++
++	private static Dictionary<string, Point> _cachedSourceSizes;
++
++	private static Color[] _cachedSkinColorsData;
++
++	private static int _cachedSkinColorsHeight;
++
++	private static Color[] _cachedShoeColorsData;
++
++	private static int _cachedShoeColorsHeight;
++
++	private static Dictionary<long, Color[]> _cachedShirtSleevePixels;
++
++	private static Color[] _reusableShirtStrip;
++
++	private string _loadedBaseTextureName;
++
+ 	[XmlElement("textureName")]
+ 	public readonly NetString textureName = new NetString();
+ 
+@@ -181,7 +199,10 @@ public class FarmerRenderer : INetObject<NetFields>
+ 			.AddField(shoes)
+ 			.AddField(shirt)
+ 			.AddField(pants);
+-		farmerTextureManager = Game1.content.CreateTemporary();
++		if (!VitaPlatform.IsVita)
++		{
++			farmerTextureManager = Game1.content.CreateTemporary();
++		}
+ 		textureName.fieldChangeVisibleEvent += delegate
+ 		{
+ 			_spriteDirty = true;
+@@ -248,70 +269,95 @@ public class FarmerRenderer : INetObject<NetFields>
+ 		return true;
+ 	}
+ 
++	internal void PrewarmForMenu(Farmer farmer)
++	{
++		if (farmer == null)
++		{
++			return;
++		}
++		executeRecolorActions(farmer);
++		farmer.GetDisplayShirt(out _, out _);
++		farmer.GetDisplayPants(out _, out _);
++		if (farmer.hat.Value != null)
++		{
++			ItemRegistry.GetDataOrErrorItem(farmer.hat.Value.QualifiedItemId)?.GetTexture();
++		}
++	}
++
++	private LocalizedContentManager ContentSource => VitaPlatform.IsVita ? Game1.content : farmerTextureManager;
++
++	private Color[] EnsureCachedSourcePixels(string texName, out Point texSize)
++	{
++		if (recolorOffsets == null)
++		{
++			recolorOffsets = new Dictionary<string, Dictionary<int, List<int>>>();
++		}
++		if (_cachedSourcePixels == null)
++		{
++			_cachedSourcePixels = new Dictionary<string, Color[]>();
++			_cachedSourceSizes = new Dictionary<string, Point>();
++		}
++		if (!recolorOffsets.ContainsKey(texName) || !_cachedSourcePixels.TryGetValue(texName, out Color[] sourcePixelData))
++		{
++			recolorOffsets[texName] = new Dictionary<int, List<int>>();
++			Texture2D sourceTexture = ContentSource.Load<Texture2D>(texName);
++			sourcePixelData = new Color[sourceTexture.GetElementCount()];
++			sourceTexture.GetData(sourcePixelData, 0, sourcePixelData.Length);
++			texSize = new Point(sourceTexture.GetActualWidth(), sourceTexture.GetActualHeight());
++			_cachedSourcePixels[texName] = sourcePixelData;
++			_cachedSourceSizes[texName] = texSize;
++			_GeneratePixelIndices(256, texName, sourcePixelData);
++			_GeneratePixelIndices(257, texName, sourcePixelData);
++			_GeneratePixelIndices(258, texName, sourcePixelData);
++			_GeneratePixelIndices(268, texName, sourcePixelData);
++			_GeneratePixelIndices(269, texName, sourcePixelData);
++			_GeneratePixelIndices(270, texName, sourcePixelData);
++			_GeneratePixelIndices(271, texName, sourcePixelData);
++			_GeneratePixelIndices(260, texName, sourcePixelData);
++			_GeneratePixelIndices(261, texName, sourcePixelData);
++			_GeneratePixelIndices(262, texName, sourcePixelData);
++			_GeneratePixelIndices(276, texName, sourcePixelData);
++			_GeneratePixelIndices(277, texName, sourcePixelData);
++		}
++		else
++		{
++			texSize = _cachedSourceSizes[texName];
++		}
++		return sourcePixelData;
++	}
++
+ 	private void executeRecolorActions(Farmer farmer)
+ 	{
+ 		if (_spriteDirty)
+ 		{
+ 			_spriteDirty = false;
+-			if (_baseTextureDirty)
++			string texName = textureName.Value;
++			Color[] pixelData = EnsureCachedSourcePixels(texName, out Point texSize);
++			if (_baseTextureDirty || baseTexture == null || baseTexture.IsDisposed || _loadedBaseTextureName != texName || baseTexture.Width != texSize.X || baseTexture.Height != texSize.Y)
+ 			{
+ 				_baseTextureDirty = false;
+-				textureChanged();
+-				_eyesDirty = true;
+-				_shoesDirty = true;
+-				_pantsDirty = true;
+-				_skinDirty = true;
+-				_shirtDirty = true;
+-			}
+-			if (recolorOffsets == null)
+-			{
+-				recolorOffsets = new Dictionary<string, Dictionary<int, List<int>>>();
+-			}
+-			if (!recolorOffsets.ContainsKey(textureName.Value))
+-			{
+-				recolorOffsets[textureName.Value] = new Dictionary<int, List<int>>();
+-				Texture2D sourceTexture = farmerTextureManager.Load<Texture2D>(textureName.Value);
+-				Color[] sourcePixelData = new Color[sourceTexture.Width * sourceTexture.Height];
+-				sourceTexture.GetData(sourcePixelData);
+-				_GeneratePixelIndices(256, textureName.Value, sourcePixelData);
+-				_GeneratePixelIndices(257, textureName.Value, sourcePixelData);
+-				_GeneratePixelIndices(258, textureName.Value, sourcePixelData);
+-				_GeneratePixelIndices(268, textureName.Value, sourcePixelData);
+-				_GeneratePixelIndices(269, textureName.Value, sourcePixelData);
+-				_GeneratePixelIndices(270, textureName.Value, sourcePixelData);
+-				_GeneratePixelIndices(271, textureName.Value, sourcePixelData);
+-				_GeneratePixelIndices(260, textureName.Value, sourcePixelData);
+-				_GeneratePixelIndices(261, textureName.Value, sourcePixelData);
+-				_GeneratePixelIndices(262, textureName.Value, sourcePixelData);
+-				_GeneratePixelIndices(276, textureName.Value, sourcePixelData);
+-				_GeneratePixelIndices(277, textureName.Value, sourcePixelData);
+-			}
+-			Color[] pixelData = new Color[baseTexture.Width * baseTexture.Height];
+-			baseTexture.GetData(pixelData);
+-			if (_eyesDirty)
+-			{
+-				_eyesDirty = false;
+-				ApplyEyeColor(textureName.Value, pixelData);
+-			}
+-			if (_skinDirty)
+-			{
+-				_skinDirty = false;
+-				ApplySkinColor(textureName.Value, pixelData);
+-			}
+-			if (_shoesDirty)
+-			{
+-				_shoesDirty = false;
+-				ApplyShoeColor(textureName.Value, pixelData);
+-			}
+-			if (_shirtDirty)
+-			{
+-				_shirtDirty = false;
+-				ApplySleeveColor(textureName.Value, pixelData, farmer);
+-			}
+-			if (_pantsDirty)
+-			{
+-				_pantsDirty = false;
++				if (baseTexture == null || baseTexture.IsDisposed || _loadedBaseTextureName != texName || baseTexture.Width != texSize.X || baseTexture.Height != texSize.Y)
++				{
++					if (baseTexture != null)
++					{
++						baseTexture.Dispose();
++					}
++					baseTexture = new Texture2D(Game1.graphics.GraphicsDevice, texSize.X, texSize.Y)
++					{
++						Name = "@FarmerRenderer.baseTexture"
++					};
++					_loadedBaseTextureName = texName;
++				}
+ 			}
++			_eyesDirty = false;
++			ApplyEyeColor(texName, pixelData);
++			_skinDirty = false;
++			ApplySkinColor(texName, pixelData);
++			_shoesDirty = false;
++			ApplyShoeColor(texName, pixelData);
++			_shirtDirty = false;
++			ApplySleeveColor(texName, pixelData, farmer);
++			_pantsDirty = false;
+ 			baseTexture.SetData(pixelData);
+ 		}
+ 	}
+@@ -332,24 +378,34 @@ public class FarmerRenderer : INetObject<NetFields>
+ 
+ 	public void unload()
+ 	{
+-		farmerTextureManager.Unload();
+-		farmerTextureManager.Dispose();
+-	}
+-
+-	public void textureChanged()
+-	{
++		farmerTextureManager?.Unload();
++		farmerTextureManager?.Dispose();
+ 		if (baseTexture != null)
+ 		{
+ 			baseTexture.Dispose();
+ 			baseTexture = null;
+ 		}
+-		Texture2D sourceTexture = farmerTextureManager.Load<Texture2D>(textureName.Value);
+-		baseTexture = new Texture2D(Game1.graphics.GraphicsDevice, sourceTexture.GetActualWidth(), sourceTexture.GetActualHeight())
++		_loadedBaseTextureName = null;
++		_baseTextureDirty = true;
++		_spriteDirty = true;
++	}
++
++	public void textureChanged()
++	{
++		string texName = textureName.Value;
++		Color[] data = EnsureCachedSourcePixels(texName, out Point texSize);
++		if (baseTexture == null || baseTexture.IsDisposed || _loadedBaseTextureName != texName || baseTexture.Width != texSize.X || baseTexture.Height != texSize.Y)
+ 		{
+-			Name = "@FarmerRenderer.baseTexture"
+-		};
+-		Color[] data = new Color[sourceTexture.GetElementCount()];
+-		sourceTexture.GetData(data, 0, data.Length);
++			if (baseTexture != null)
++			{
++				baseTexture.Dispose();
++			}
++			baseTexture = new Texture2D(Game1.graphics.GraphicsDevice, texSize.X, texSize.Y)
++			{
++				Name = "@FarmerRenderer.baseTexture"
++			};
++			_loadedBaseTextureName = texName;
++		}
+ 		baseTexture.SetData(data);
+ 	}
+ 
+@@ -383,10 +439,36 @@ public class FarmerRenderer : INetObject<NetFields>
+ 		shoes.Set(which);
+ 	}
+ 
++	private Color[] GetDefaultShoeColorsData(out int height)
++	{
++		if (_cachedShoeColorsData == null)
++		{
++			Texture2D shoeColors = ContentSource.Load<Texture2D>("Characters\\Farmer\\shoeColors");
++			_cachedShoeColorsHeight = shoeColors.Height;
++			_cachedShoeColorsData = new Color[shoeColors.Width * shoeColors.Height];
++			shoeColors.GetData(_cachedShoeColorsData);
++		}
++		height = _cachedShoeColorsHeight;
++		return _cachedShoeColorsData;
++	}
++
++	private Color[] GetSkinColorsData(out int height)
++	{
++		if (_cachedSkinColorsData == null)
++		{
++			Texture2D skinColors = ContentSource.Load<Texture2D>("Characters\\Farmer\\skinColors");
++			_cachedSkinColorsHeight = skinColors.Height;
++			_cachedSkinColorsData = new Color[skinColors.Width * skinColors.Height];
++			skinColors.GetData(_cachedSkinColorsData);
++		}
++		height = _cachedSkinColorsHeight;
++		return _cachedSkinColorsData;
++	}
++
+ 	private void ApplyShoeColor(string texture_name, Color[] pixels)
+ 	{
+ 		int which = 12;
+-		Texture2D texture = null;
++		Texture2D customTexture = null;
+ 		int splitIndex = shoes.Value.LastIndexOf(':');
+ 		if (splitIndex > -1)
+ 		{
+@@ -394,7 +476,7 @@ public class FarmerRenderer : INetObject<NetFields>
+ 			string index = shoes.Value.Substring(splitIndex + 1);
+ 			try
+ 			{
+-				texture = farmerTextureManager.Load<Texture2D>(texturePath);
++				customTexture = ContentSource.Load<Texture2D>(texturePath);
+ 				if (!int.TryParse(index, out which))
+ 				{
+ 					which = 12;
+@@ -402,35 +484,42 @@ public class FarmerRenderer : INetObject<NetFields>
+ 			}
+ 			catch (Exception)
+ 			{
+-				texture = farmerTextureManager.Load<Texture2D>("Characters\\Farmer\\shoeColors");
++				customTexture = null;
+ 			}
+ 		}
+ 		else if (!int.TryParse(shoes.Value, out which))
+ 		{
+ 			which = 12;
+ 		}
+-		if (texture == null)
++		Color[] shoeColorsData;
++		int shoeHeight;
++		if (customTexture != null)
+ 		{
+-			texture = farmerTextureManager.Load<Texture2D>("Characters\\Farmer\\shoeColors");
++			if (customTexture.Width < 4)
++			{
++				return;
++			}
++			shoeHeight = customTexture.Height;
++			shoeColorsData = new Color[customTexture.Width * shoeHeight];
++			customTexture.GetData(shoeColorsData);
+ 		}
+-		Texture2D shoeColors = texture;
+-		if (which >= shoeColors.Height)
++		else
+ 		{
+-			which = shoeColors.Height - 1;
++			shoeColorsData = GetDefaultShoeColorsData(out shoeHeight);
+ 		}
+-		if (shoeColors.Width >= 4)
++		if (which >= shoeHeight)
+ 		{
+-			Color[] shoeColorsData = new Color[shoeColors.Width * shoeColors.Height];
+-			shoeColors.GetData(shoeColorsData);
+-			Color darkest = shoeColorsData[which * 4 % (shoeColors.Height * 4)];
+-			Color medium = shoeColorsData[which * 4 % (shoeColors.Height * 4) + 1];
+-			Color lightest = shoeColorsData[which * 4 % (shoeColors.Height * 4) + 2];
+-			Color lightest2 = shoeColorsData[which * 4 % (shoeColors.Height * 4) + 3];
+-			_SwapColor(texture_name, pixels, 268, darkest);
+-			_SwapColor(texture_name, pixels, 269, medium);
+-			_SwapColor(texture_name, pixels, 270, lightest);
+-			_SwapColor(texture_name, pixels, 271, lightest2);
++			which = shoeHeight - 1;
+ 		}
++		int baseIdx = which * 4 % (shoeHeight * 4);
++		Color darkest = shoeColorsData[baseIdx];
++		Color medium = shoeColorsData[baseIdx + 1];
++		Color lightest = shoeColorsData[baseIdx + 2];
++		Color lightest2 = shoeColorsData[baseIdx + 3];
++		_SwapColor(texture_name, pixels, 268, darkest);
++		_SwapColor(texture_name, pixels, 269, medium);
++		_SwapColor(texture_name, pixels, 270, lightest);
++		_SwapColor(texture_name, pixels, 271, lightest2);
+ 	}
+ 
+ 	public int recolorSkin(int which, bool force = false)
+@@ -446,20 +535,19 @@ public class FarmerRenderer : INetObject<NetFields>
+ 	private void ApplySkinColor(string texture_name, Color[] pixels)
+ 	{
+ 		int which = skin.Value;
+-		Texture2D skinColors = farmerTextureManager.Load<Texture2D>("Characters\\Farmer\\skinColors");
+-		Color[] skinColorsData = new Color[skinColors.Width * skinColors.Height];
++		Color[] skinColorsData = GetSkinColorsData(out int skinHeight);
+ 		if (which < 0)
+ 		{
+-			which = skinColors.Height - 1;
++			which = skinHeight - 1;
+ 		}
+-		if (which > skinColors.Height - 1)
++		if (which > skinHeight - 1)
+ 		{
+ 			which = 0;
+ 		}
+-		skinColors.GetData(skinColorsData);
+-		Color darkest = skinColorsData[which * 3 % (skinColors.Height * 3)];
+-		Color medium = skinColorsData[which * 3 % (skinColors.Height * 3) + 1];
+-		Color lightest = skinColorsData[which * 3 % (skinColors.Height * 3) + 2];
++		int baseIdx = which * 3 % (skinHeight * 3);
++		Color darkest = skinColorsData[baseIdx];
++		Color medium = skinColorsData[baseIdx + 1];
++		Color lightest = skinColorsData[baseIdx + 2];
+ 		if (skin.Value == -12345)
+ 		{
+ 			darkest = (medium = (lightest = Color.Transparent));
+@@ -486,33 +574,34 @@ public class FarmerRenderer : INetObject<NetFields>
+ 		_pantsDirty = true;
+ 		_eyesDirty = true;
+ 		_shoesDirty = true;
+-		_baseTextureDirty = true;
++		if (baseTexture == null || baseTexture.IsDisposed)
++		{
++			_baseTextureDirty = true;
++		}
+ 	}
+ 
+ 	public void ApplySleeveColor(string texture_name, Color[] pixels, Farmer who)
+ 	{
+ 		who.GetDisplayShirt(out var shirtTexture, out var shirtIndex);
+-		Color[] shirtData = new Color[shirtTexture.Bounds.Width * shirtTexture.Bounds.Height];
+-		shirtTexture.GetData(shirtData);
+ 		int index = shirtIndex * 8 / 128 * 32 * shirtTexture.Bounds.Width + shirtIndex * 8 % 128 + shirtTexture.Width * 4;
+ 		int dyeIndex = index + 128;
+-		if (!who.ShirtHasSleeves() || index >= shirtData.Length || (skin.Value == -12345 && who.shirtItem.Value == null))
++		int shirtLength = shirtTexture.Bounds.Width * shirtTexture.Bounds.Height;
++		if (!who.ShirtHasSleeves() || index >= shirtLength || (skin.Value == -12345 && who.shirtItem.Value == null))
+ 		{
+-			Texture2D skinColors = farmerTextureManager.Load<Texture2D>("Characters\\Farmer\\skinColors");
+-			Color[] skinColorsData = new Color[skinColors.Width * skinColors.Height];
++			Color[] skinColorsData = GetSkinColorsData(out int skinHeight);
+ 			int skinIndex = skin.Value;
+ 			if (skinIndex < 0)
+ 			{
+-				skinIndex = skinColors.Height - 1;
++				skinIndex = skinHeight - 1;
+ 			}
+-			if (skinIndex > skinColors.Height - 1)
++			if (skinIndex > skinHeight - 1)
+ 			{
+ 				skinIndex = 0;
+ 			}
+-			skinColors.GetData(skinColorsData);
+-			Color darkest = skinColorsData[skinIndex * 3 % (skinColors.Height * 3)];
+-			Color medium = skinColorsData[skinIndex * 3 % (skinColors.Height * 3) + 1];
+-			Color lightest = skinColorsData[skinIndex * 3 % (skinColors.Height * 3) + 2];
++			int baseIdx = skinIndex * 3 % (skinHeight * 3);
++			Color darkest = skinColorsData[baseIdx];
++			Color medium = skinColorsData[baseIdx + 1];
++			Color lightest = skinColorsData[baseIdx + 2];
+ 			if (skin.Value == -12345)
+ 			{
+ 				darkest = pixels[260 + baseTexture.Width * 2];
+@@ -531,28 +620,64 @@ public class FarmerRenderer : INetObject<NetFields>
+ 		}
+ 		else
+ 		{
++			if (_cachedShirtSleevePixels == null)
++			{
++				_cachedShirtSleevePixels = new Dictionary<long, Color[]>();
++			}
++			long cacheKey = ((long)System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(shirtTexture) << 32) | (uint)index;
++			if (!_cachedShirtSleevePixels.TryGetValue(cacheKey, out Color[] sixPixels))
++			{
++				Color[] shirtData = null;
++				Color[] vitaShirtStrip = null;
++				int vitaStripX = index % shirtTexture.Width;
++				int vitaStripY = index / shirtTexture.Width - 2;
++				if (VitaPlatform.IsVita && vitaStripX + 129 <= shirtTexture.Width && vitaStripY >= 0)
++				{
++					if (_reusableShirtStrip == null)
++					{
++						_reusableShirtStrip = new Color[129 * 3];
++					}
++					vitaShirtStrip = _reusableShirtStrip;
++					shirtTexture.GetData(0, new Rectangle(vitaStripX, vitaStripY, 129, 3), vitaShirtStrip, 0, vitaShirtStrip.Length);
++				}
++				else
++				{
++					shirtData = new Color[shirtLength];
++					shirtTexture.GetData(shirtData);
++				}
++				sixPixels = new Color[6]
++				{
++					VitaShirtPixel(shirtData, vitaShirtStrip, shirtTexture.Width, vitaStripX, vitaStripY, dyeIndex),
++					VitaShirtPixel(shirtData, vitaShirtStrip, shirtTexture.Width, vitaStripX, vitaStripY, index),
++					VitaShirtPixel(shirtData, vitaShirtStrip, shirtTexture.Width, vitaStripX, vitaStripY, dyeIndex - shirtTexture.Width),
++					VitaShirtPixel(shirtData, vitaShirtStrip, shirtTexture.Width, vitaStripX, vitaStripY, index - shirtTexture.Width),
++					VitaShirtPixel(shirtData, vitaShirtStrip, shirtTexture.Width, vitaStripX, vitaStripY, dyeIndex - shirtTexture.Width * 2),
++					VitaShirtPixel(shirtData, vitaShirtStrip, shirtTexture.Width, vitaStripX, vitaStripY, index - shirtTexture.Width * 2)
++				};
++				_cachedShirtSleevePixels[cacheKey] = sixPixels;
++			}
+ 			Color color = Utility.MakeCompletelyOpaque(who.GetShirtColor());
+-			Color shirtSleeveColor = shirtData[dyeIndex];
++			Color shirtSleeveColor = sixPixels[0];
+ 			Color clothesColor = color;
+ 			if (shirtSleeveColor.A < byte.MaxValue)
+ 			{
+-				shirtSleeveColor = shirtData[index];
++				shirtSleeveColor = sixPixels[1];
+ 				clothesColor = Color.White;
+ 			}
+ 			shirtSleeveColor = Utility.MultiplyColor(shirtSleeveColor, clothesColor);
+ 			_SwapColor(texture_name, pixels, 256, shirtSleeveColor);
+-			shirtSleeveColor = shirtData[dyeIndex - shirtTexture.Width];
++			shirtSleeveColor = sixPixels[2];
+ 			if (shirtSleeveColor.A < byte.MaxValue)
+ 			{
+-				shirtSleeveColor = shirtData[index - shirtTexture.Width];
++				shirtSleeveColor = sixPixels[3];
+ 				clothesColor = Color.White;
+ 			}
+ 			shirtSleeveColor = Utility.MultiplyColor(shirtSleeveColor, clothesColor);
+ 			_SwapColor(texture_name, pixels, 257, shirtSleeveColor);
+-			shirtSleeveColor = shirtData[dyeIndex - shirtTexture.Width * 2];
++			shirtSleeveColor = sixPixels[4];
+ 			if (shirtSleeveColor.A < byte.MaxValue)
+ 			{
+-				shirtSleeveColor = shirtData[index - shirtTexture.Width * 2];
++				shirtSleeveColor = sixPixels[5];
+ 				clothesColor = Color.White;
+ 			}
+ 			shirtSleeveColor = Utility.MultiplyColor(shirtSleeveColor, clothesColor);
+@@ -560,6 +685,17 @@ public class FarmerRenderer : INetObject<NetFields>
+ 		}
+ 	}
+ 
++	/// <summary>Port: pixel <paramref name="index" /> of the shirt sheet (<paramref name="width" /> wide), from the whole sheet off the
++	/// Vita or from the 129 x 3 strip at (<paramref name="stripX" />, <paramref name="stripY" />) on it (see ApplySleeveColor).</summary>
++	private static Color VitaShirtPixel(Color[] sheet, Color[] strip, int width, int stripX, int stripY, int index)
++	{
++		if (strip == null)
++		{
++			return sheet[index];
++		}
++		return strip[(index / width - stripY) * 129 + index % width - stripX];
++	}
++
+ 	public static Color changeBrightness(Color c, int brightness)
+ 	{
+ 		c.R = (byte)Math.Min(255, Math.Max(0, c.R + brightness));

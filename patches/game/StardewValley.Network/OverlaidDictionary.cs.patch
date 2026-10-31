@@ -1,0 +1,76 @@
+diff --git a/StardewValley.Network/OverlaidDictionary.cs b/StardewValley.Network/OverlaidDictionary.cs
+index 5df20b62d9424c1ea7088b7092d807b8f43a78a4..c73ee8e73f7b6c8f853f973a4032510d387271cd 100644
+--- a/StardewValley.Network/OverlaidDictionary.cs
++++ b/StardewValley.Network/OverlaidDictionary.cs
+@@ -18,6 +18,8 @@ public class OverlaidDictionary : IEnumerable<SerializableDictionary<Vector2, Ob
+ 
+ 	private Dictionary<Vector2, Object> _changes = new Dictionary<Vector2, Object>();
+ 
++	public int Version;
++
+ 	public int Length => compositeDict.Count;
+ 
+ 	public Object this[Vector2 key]
+@@ -59,6 +61,7 @@ public class OverlaidDictionary : IEnumerable<SerializableDictionary<Vector2, Ob
+ 
+ 	public void OnValueAdded(Vector2 key, Object value)
+ 	{
++		Version++;
+ 		if (overlayDict.TryGetValue(key, out var o))
+ 		{
+ 			compositeDict[key] = o;
+@@ -71,6 +74,7 @@ public class OverlaidDictionary : IEnumerable<SerializableDictionary<Vector2, Ob
+ 
+ 	public void OnValueRemoved(Vector2 key, Object value)
+ 	{
++		Version++;
+ 		if (overlayDict.TryGetValue(key, out var o))
+ 		{
+ 			compositeDict[key] = o;
+@@ -205,6 +209,7 @@ public class OverlaidDictionary : IEnumerable<SerializableDictionary<Vector2, Ob
+ 		{
+ 			throw new NotImplementedException();
+ 		}
++		Version++;
+ 		baseDict.Clear();
+ 		overlayDict.Clear();
+ 		compositeDict.Clear();
+@@ -247,6 +252,38 @@ public class OverlaidDictionary : IEnumerable<SerializableDictionary<Vector2, Ob
+ 		return compositeDict.TryGetValue(key, out value);
+ 	}
+ 
++	/// <summary>Port: puts every object whose key is a whole tile inside the window (x0, y0, w, h) into <paramref name="grid" /> at (y - y0) * w + (x - x0). What TryGetValue would find for each tile of the window, in one pass over the dictionary (GameLocation.draw).</summary>
++	public void GatherInto(Object[] grid, int x0, int y0, int w, int h)
++	{
++		foreach (KeyValuePair<Vector2, Object> pair in compositeDict)
++		{
++			float keyX = pair.Key.X;
++			float keyY = pair.Key.Y;
++			int ix = (int)keyX;
++			int iy = (int)keyY;
++			if (ix >= x0 && ix < x0 + w && iy >= y0 && iy < y0 + h && (float)ix == keyX && (float)iy == keyY)
++			{
++				grid[(iy - y0) * w + (ix - x0)] = pair.Value;
++			}
++		}
++	}
++
++	/// <summary>Port: populates a flat map-wide tile index (y * width + x) from compositeDict when Version/Count changes.</summary>
++	public void PopulateTileArray(Object[] tiles, int width, int height)
++	{
++		foreach (KeyValuePair<Vector2, Object> pair in compositeDict)
++		{
++			float keyX = pair.Key.X;
++			float keyY = pair.Key.Y;
++			int ix = (int)keyX;
++			int iy = (int)keyY;
++			if (ix >= 0 && ix < width && iy >= 0 && iy < height && (float)ix == keyX && (float)iy == keyY)
++			{
++				tiles[iy * width + ix] = pair.Value;
++			}
++		}
++	}
++
+ 	public Object GetValueOrDefault(Vector2 key, Object defaultValue = null)
+ 	{
+ 		return compositeDict.GetValueOrDefault(key, defaultValue);

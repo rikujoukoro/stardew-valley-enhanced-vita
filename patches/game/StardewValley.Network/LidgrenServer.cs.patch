@@ -1,0 +1,125 @@
+diff --git a/StardewValley.Network/LidgrenServer.cs b/StardewValley.Network/LidgrenServer.cs
+index c3dc7a52355cea7bf3581bfe4417bbcd5984cc5e..bc149c259267bf1b91aa7514b1e3cda8171e3bb5 100644
+--- a/StardewValley.Network/LidgrenServer.cs
++++ b/StardewValley.Network/LidgrenServer.cs
+@@ -101,15 +101,15 @@ public class LidgrenServer : HookableServer
+ 	public override void initialize()
+ 	{
+ 		Game1.log.Verbose("Starting LAN server");
+-		NetPeerConfiguration config = new NetPeerConfiguration("StardewValley");
+-		config.EnableMessageType(NetIncomingMessageType.DiscoveryRequest);
+-		config.EnableMessageType(NetIncomingMessageType.ConnectionApproval);
+-		config.Port = 24642;
+-		config.ConnectionTimeout = 30f;
+-		config.PingInterval = 5f;
+-		config.MaximumConnections = Game1.multiplayer.playerLimit * 2;
+-		config.MaximumTransmissionUnit = 1200;
+-		server = new NetServer(config);
++		NetPeerConfiguration netPeerConfiguration = new NetPeerConfiguration("StardewValley");
++		netPeerConfiguration.EnableMessageType(NetIncomingMessageType.DiscoveryRequest);
++		netPeerConfiguration.EnableMessageType(NetIncomingMessageType.ConnectionApproval);
++		netPeerConfiguration.Port = 24642;
++		netPeerConfiguration.ConnectionTimeout = 30f;
++		netPeerConfiguration.PingInterval = 5f;
++		netPeerConfiguration.MaximumConnections = Game1.multiplayer.playerLimit * 2;
++		netPeerConfiguration.MaximumTransmissionUnit = 1200;
++		server = new NetServer(netPeerConfiguration);
+ 		server.Start();
+ 	}
+ 
+@@ -142,48 +142,48 @@ public class LidgrenServer : HookableServer
+ 
+ 	public override void receiveMessages()
+ 	{
+-		NetIncomingMessage inc;
+-		while ((inc = server.ReadMessage()) != null)
++		NetIncomingMessage netIncomingMessage;
++		while ((netIncomingMessage = server.ReadMessage()) != null)
+ 		{
+-			bandwidthLogger?.RecordBytesDown(inc.LengthBytes);
+-			switch (inc.MessageType)
++			bandwidthLogger?.RecordBytesDown(netIncomingMessage.LengthBytes);
++			switch (netIncomingMessage.MessageType)
+ 			{
+ 			case NetIncomingMessageType.DiscoveryRequest:
+-				if ((Game1.options.ipConnectionsEnabled || gameServer.IsLocalMultiplayerInitiatedServer()) && (!gameServer.IsLocalMultiplayerInitiatedServer() || IsLocal(inc.SenderEndPoint.Address.ToString())) && !gameServer.isUserBanned(inc.SenderEndPoint.Address.ToString()))
++				if ((Game1.options.ipConnectionsEnabled || gameServer.IsLocalMultiplayerInitiatedServer()) && (!gameServer.IsLocalMultiplayerInitiatedServer() || IsLocal(netIncomingMessage.SenderEndPoint.Address.ToString())) && !gameServer.isUserBanned(netIncomingMessage.SenderEndPoint.Address.ToString()))
+ 				{
+-					sendVersionInfo(inc);
++					sendVersionInfo(netIncomingMessage);
+ 				}
+ 				break;
+ 			case NetIncomingMessageType.ConnectionApproval:
+ 				if (Game1.options.ipConnectionsEnabled || gameServer.IsLocalMultiplayerInitiatedServer())
+ 				{
+-					inc.SenderConnection.Approve();
++					netIncomingMessage.SenderConnection.Approve();
+ 				}
+ 				else
+ 				{
+-					inc.SenderConnection.Deny();
++					netIncomingMessage.SenderConnection.Deny();
+ 				}
+ 				break;
+ 			case NetIncomingMessageType.Data:
+-				parseDataMessageFromClient(inc);
++				parseDataMessageFromClient(netIncomingMessage);
+ 				break;
+ 			case NetIncomingMessageType.DebugMessage:
+ 			case NetIncomingMessageType.WarningMessage:
+ 			case NetIncomingMessageType.ErrorMessage:
+ 			{
+-				string message = inc.ReadString();
+-				Game1.log.Verbose(string.Concat(inc.MessageType, ": ", message));
+-				Game1.debugOutput = message;
++				string text = netIncomingMessage.ReadString();
++				Game1.log.Verbose(string.Concat(netIncomingMessage.MessageType, ": ", text));
++				Game1.debugOutput = text;
+ 				break;
+ 			}
+ 			case NetIncomingMessageType.StatusChanged:
+-				statusChanged(inc);
++				statusChanged(netIncomingMessage);
+ 				break;
+ 			default:
+-				Game1.debugOutput = inc.ToString();
++				Game1.debugOutput = netIncomingMessage.ToString();
+ 				break;
+ 			}
+-			server.Recycle(inc);
++			server.Recycle(netIncomingMessage);
+ 		}
+ 		foreach (NetConnection conn in server.Connections)
+ 		{
+@@ -208,11 +208,11 @@ public class LidgrenServer : HookableServer
+ 
+ 	private void sendVersionInfo(NetIncomingMessage message)
+ 	{
+-		NetOutgoingMessage response = server.CreateMessage();
+-		response.Write(Multiplayer.protocolVersion);
+-		response.Write("StardewValley");
+-		server.SendDiscoveryResponse(response, message.SenderEndPoint);
+-		bandwidthLogger?.RecordBytesUp(response.LengthBytes);
++		NetOutgoingMessage netOutgoingMessage = server.CreateMessage();
++		netOutgoingMessage.Write(Multiplayer.protocolVersion);
++		netOutgoingMessage.Write("StardewValley");
++		server.SendDiscoveryResponse(netOutgoingMessage, message.SenderEndPoint);
++		bandwidthLogger?.RecordBytesUp(netOutgoingMessage.LengthBytes);
+ 	}
+ 
+ 	private void statusChanged(NetIncomingMessage message)
+@@ -308,10 +308,10 @@ public class LidgrenServer : HookableServer
+ 
+ 	protected virtual void sendMessage(NetConnection connection, OutgoingMessage message)
+ 	{
+-		NetOutgoingMessage msg = server.CreateMessage();
+-		LidgrenMessageUtils.WriteMessage(message, msg);
+-		server.SendMessage(msg, connection, NetDeliveryMethod.ReliableOrdered);
+-		bandwidthLogger?.RecordBytesUp(msg.LengthBytes);
++		NetOutgoingMessage netOutgoingMessage = server.CreateMessage();
++		LidgrenMessageUtils.WriteMessage(message, netOutgoingMessage);
++		server.SendMessage(netOutgoingMessage, connection, NetDeliveryMethod.ReliableOrdered);
++		bandwidthLogger?.RecordBytesUp(netOutgoingMessage.LengthBytes);
+ 	}
+ 
+ 	public override void setLobbyData(string key, string value)

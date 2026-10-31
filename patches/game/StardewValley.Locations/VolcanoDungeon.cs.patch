@@ -1,0 +1,13 @@
+diff --git a/StardewValley.Locations/VolcanoDungeon.cs b/StardewValley.Locations/VolcanoDungeon.cs
+index 13449b60ed930c29c3423a227fe71c6737544aaf..35fa24a450b9ce7c29407578c08f1497b175e996 100644
+--- a/StardewValley.Locations/VolcanoDungeon.cs
++++ b/StardewValley.Locations/VolcanoDungeon.cs
+@@ -1736,7 +1736,7 @@ public class VolcanoDungeon : IslandLocation
+ 							index += i * 10;
+ 						}
+ 						double chance = 1.0;
+-						if (FrameworkExtensions.TryGetValue(tile.Properties, "Chance", out var property) && !double.TryParse(property, out chance))
++						if (FrameworkExtensions.TryGetValue(tile.PropertiesIfAny, "Chance", out var property) && !double.TryParse(property, out chance))
+ 						{
+ 							chance = 1.0;
+ 						}

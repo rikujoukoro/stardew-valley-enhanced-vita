@@ -1,0 +1,1120 @@
+diff --git a/src/Graphics/SpriteBatch.cs b/src/Graphics/SpriteBatch.cs
+index b60a0f4296561eaa7bad446dd409dcfd79d7f420..bf1b94067953c876c3c327b5833b548a84c8f576 100644
+--- a/src/Graphics/SpriteBatch.cs
++++ b/src/Graphics/SpriteBatch.cs
+@@ -93,9 +93,24 @@ namespace Microsoft.Xna.Framework.Graphics
+ 
+ 		// Local data stored before buffering to GPU
+ 		private SpriteInfo[] spriteInfos;
+-		private IntPtr[] sortedSpriteInfos; // SpriteInfo*[]
++		/* Vita port: sort scratch (radix keys + sprite indices) replaces the IntPtr[] + Array.Sort(keys, items, IComparer)
++		 * path; allocated lazily only for non-Deferred modes, sized to numSprites. */
++		private uint[] sortKeys;
++		private uint[] sortKeysTmp;
++		private int[] sortOrder;
++		private int[] sortOrderTmp;
+ 		private VertexPositionColorTexture4[] vertexInfo;
+-		private Texture2D[] textureInfo;
++		// Vita port: struct wrapper so stores skip the covariant array-store check (virt_stelemref_class_small_idepth).
++		private struct TexRef
++		{
++			public Texture2D tex;
++		}
++		private TexRef[] textureInfo;
++
++		/* Vita port: Object.GetHashCode is an icall on Mono; it is only needed for SpriteSortMode.Texture and
++		 * consecutive sprites nearly always share a texture, so it is cached for the last texture. */
++		private Texture2D hashTexture;
++		private int hashValue;
+ 
+ 		// Default SpriteBatch Effect
+ 		private Effect spriteEffect;
+@@ -124,6 +139,13 @@ namespace Microsoft.Xna.Framework.Graphics
+ 		// Matrix to be used when creating the projection matrix
+ 		private Matrix transformMatrix;
+ 
++		/* Vita port: on the virtual back buffer, unrotated sprites are moved to whole real pixels
++		 * (0 = off). A sprite at an odd world pixel at scale 0.5 has texel edges on pixel
++		 * centers: point sampling then picks texels outside the source rectangle (lines from
++		 * the neighbouring frame) and art pixels of uneven width.
++		 */
++		private float vitaSnapScale;
++
+ 		// User-provided Effect, if applicable
+ 		private Effect customEffect;
+ 
+@@ -155,9 +177,8 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			base.graphicsDevice = graphicsDevice;
+ 
+ 			vertexInfo = new VertexPositionColorTexture4[MAX_SPRITES];
+-			textureInfo = new Texture2D[MAX_SPRITES];
++			textureInfo = new TexRef[MAX_SPRITES];
+ 			spriteInfos = new SpriteInfo[MAX_SPRITES];
+-			sortedSpriteInfos = new IntPtr[MAX_SPRITES];
+ 			vertexBuffer = new DynamicVertexBuffer(
+ 				graphicsDevice,
+ 				VertexPositionColorTexture.VertexDeclaration,
+@@ -184,6 +205,60 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			supportsNoOverwrite = FNA3D.FNA3D_SupportsNoOverwrite(
+ 				GraphicsDevice.GLDevice
+ 			) == 1;
++			try
++			{
++				vitaNativeFlush = FNA3D.FNA3D_VitaSpriteBatchAvailable(GraphicsDevice.GLDevice) == 1;
++			}
++			catch (EntryPointNotFoundException)
++			{
++				vitaNativeFlush = false;
++			}
++		}
++
++		/* Vita port: whether End hands the queued sprites to FNA3D's render thread, which sorts them, builds
++		 * the vertices and draws them there (FNA3D_VitaSpriteBatch); see VitaFlushNative.
++		 */
++		private bool vitaNativeFlush;
++
++		private IntPtr[] vitaTextures;
++
++		private unsafe void VitaFlushNative()
++		{
++			int n = numSprites;
++			if (vitaTextures == null || vitaTextures.Length < n)
++			{
++				vitaTextures = new IntPtr[Math.Max(n, vertexInfo.Length)];
++			}
++			TexRef[] texInfo = textureInfo;
++			IntPtr[] natives = vitaTextures;
++			for (int i = 0; i < n; i += 1)
++			{
++				natives[i] = texInfo[i].tex.texture;
++			}
++			FNA3D.FNA3D_VertexBufferBinding binding;
++			byte bindingsUpdated;
++			GraphicsDevice.VitaPrepareSpriteBatch(texInfo[0].tex, out binding, out bindingsUpdated);
++			fixed (SpriteInfo* infos = &spriteInfos[0])
++			fixed (VertexPositionColorTexture4* vertices = &vertexInfo[0])
++			fixed (IntPtr* textures = &natives[0])
++			{
++				FNA3D.FNA3D_VitaSpriteBatch(
++					GraphicsDevice.GLDevice,
++					(sortMode == SpriteSortMode.Deferred) ? (IntPtr) vertices : (IntPtr) infos,
++					(IntPtr) textures,
++					n,
++					(int) sortMode,
++					ref samplerState.state,
++					ref binding,
++					bindingsUpdated,
++					indexBuffer.buffer
++				);
++			}
++			// The textures stay referenced by the batch's arrays until they are overwritten; the render
++			// thread uses the native handles before any later dispose (it runs the calls in order).
++			numSprites = 0;
++			// The render thread filled the vertex buffer from its start: the next upload from here discards.
++			bufferOffset = MAX_SPRITES;
+ 		}
+ 
+ 		#endregion
+@@ -294,6 +369,9 @@ namespace Microsoft.Xna.Framework.Graphics
+ 
+ 			customEffect = effect;
+ 			this.transformMatrix = transformMatrix;
++			vitaSnapScale = (GraphicsDevice.VitaVirtual && transformMatrix == Matrix.Identity)
++				? GraphicsDevice.VitaBackBufferScale
++				: 0f;
+ 
+ 			if (sortMode == SpriteSortMode.Immediate)
+ 			{
+@@ -384,12 +462,13 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			float destW, destH;
+ 			if (sourceRectangle.HasValue)
+ 			{
+-				sourceX = sourceRectangle.Value.X / (float) texture.Width;
+-				sourceY = sourceRectangle.Value.Y / (float) texture.Height;
+-				sourceW = sourceRectangle.Value.Width / (float) texture.Width;
+-				sourceH = sourceRectangle.Value.Height / (float) texture.Height;
+-				destW = sourceRectangle.Value.Width;
+-				destH = sourceRectangle.Value.Height;
++				Rectangle srcRect = sourceRectangle.Value; // Vita port: one Nullable.Value call
++				sourceX = srcRect.X / (float) texture.Width;
++				sourceY = srcRect.Y / (float) texture.Height;
++				sourceW = srcRect.Width / (float) texture.Width;
++				sourceH = srcRect.Height / (float) texture.Height;
++				destW = srcRect.Width;
++				destH = srcRect.Height;
+ 			}
+ 			else
+ 			{
+@@ -441,18 +520,13 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			float destH = scale;
+ 			if (sourceRectangle.HasValue)
+ 			{
+-				sourceX = sourceRectangle.Value.X / (float) texture.Width;
+-				sourceY = sourceRectangle.Value.Y / (float) texture.Height;
+-				sourceW = Math.Sign(sourceRectangle.Value.Width) * Math.Max(
+-					Math.Abs(sourceRectangle.Value.Width),
+-					MathHelper.FloatEpsilon
+-				) / (float) texture.Width;
+-				sourceH = Math.Sign(sourceRectangle.Value.Height) * Math.Max(
+-					Math.Abs(sourceRectangle.Value.Height),
+-					MathHelper.FloatEpsilon
+-				) / (float) texture.Height;
+-				destW *= sourceRectangle.Value.Width;
+-				destH *= sourceRectangle.Value.Height;
++				Rectangle srcRect = sourceRectangle.Value; // Vita port: one Nullable.Value call
++				sourceX = srcRect.X / (float) texture.Width;
++				sourceY = srcRect.Y / (float) texture.Height;
++				sourceW = (srcRect.Width > 0 ? (float) srcRect.Width : Math.Sign(srcRect.Width) * Math.Max(Math.Abs(srcRect.Width), MathHelper.FloatEpsilon)) / (float) texture.Width;
++				sourceH = (srcRect.Height > 0 ? (float) srcRect.Height : Math.Sign(srcRect.Height) * Math.Max(Math.Abs(srcRect.Height), MathHelper.FloatEpsilon)) / (float) texture.Height;
++				destW *= srcRect.Width;
++				destH *= srcRect.Height;
+ 			}
+ 			else
+ 			{
+@@ -474,10 +548,10 @@ namespace Microsoft.Xna.Framework.Graphics
+ 				destW,
+ 				destH,
+ 				color,
+-				origin.X / sourceW / (float) texture.Width,
+-				origin.Y / sourceH / (float) texture.Height,
+-				(float) Math.Sin(rotation),
+-				(float) Math.Cos(rotation),
++				(origin.X == 0f) ? 0f : origin.X / sourceW / (float) texture.Width, // Vita port: skip two divisions for a zero origin
++				(origin.Y == 0f) ? 0f : origin.Y / sourceH / (float) texture.Height,
++				(rotation == 0f) ? 0f : (float) Math.Sin(rotation), // Vita port: most sprites are unrotated
++				(rotation == 0f) ? 1f : (float) Math.Cos(rotation),
+ 				layerDepth,
+ 				(int) (effects & (SpriteEffects) 0x03)
+ 			);
+@@ -502,18 +576,13 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			float sourceX, sourceY, sourceW, sourceH;
+ 			if (sourceRectangle.HasValue)
+ 			{
+-				sourceX = sourceRectangle.Value.X / (float) texture.Width;
+-				sourceY = sourceRectangle.Value.Y / (float) texture.Height;
+-				sourceW = Math.Sign(sourceRectangle.Value.Width) * Math.Max(
+-					Math.Abs(sourceRectangle.Value.Width),
+-					MathHelper.FloatEpsilon
+-				) / (float) texture.Width;
+-				sourceH = Math.Sign(sourceRectangle.Value.Height) * Math.Max(
+-					Math.Abs(sourceRectangle.Value.Height),
+-					MathHelper.FloatEpsilon
+-				) / (float) texture.Height;
+-				scale.X *= sourceRectangle.Value.Width;
+-				scale.Y *= sourceRectangle.Value.Height;
++				Rectangle srcRect = sourceRectangle.Value; // Vita port: one Nullable.Value call
++				sourceX = srcRect.X / (float) texture.Width;
++				sourceY = srcRect.Y / (float) texture.Height;
++				sourceW = (srcRect.Width > 0 ? (float) srcRect.Width : Math.Sign(srcRect.Width) * Math.Max(Math.Abs(srcRect.Width), MathHelper.FloatEpsilon)) / (float) texture.Width;
++				sourceH = (srcRect.Height > 0 ? (float) srcRect.Height : Math.Sign(srcRect.Height) * Math.Max(Math.Abs(srcRect.Height), MathHelper.FloatEpsilon)) / (float) texture.Height;
++				scale.X *= srcRect.Width;
++				scale.Y *= srcRect.Height;
+ 			}
+ 			else
+ 			{
+@@ -535,10 +604,10 @@ namespace Microsoft.Xna.Framework.Graphics
+ 				scale.X,
+ 				scale.Y,
+ 				color,
+-				origin.X / sourceW / (float) texture.Width,
+-				origin.Y / sourceH / (float) texture.Height,
+-				(float) Math.Sin(rotation),
+-				(float) Math.Cos(rotation),
++				(origin.X == 0f) ? 0f : origin.X / sourceW / (float) texture.Width, // Vita port: skip two divisions for a zero origin
++				(origin.Y == 0f) ? 0f : origin.Y / sourceH / (float) texture.Height,
++				(rotation == 0f) ? 0f : (float) Math.Sin(rotation), // Vita port: most sprites are unrotated
++				(rotation == 0f) ? 1f : (float) Math.Cos(rotation),
+ 				layerDepth,
+ 				(int) (effects & (SpriteEffects) 0x03)
+ 			);
+@@ -588,10 +657,11 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			float sourceX, sourceY, sourceW, sourceH;
+ 			if (sourceRectangle.HasValue)
+ 			{
+-				sourceX = sourceRectangle.Value.X / (float) texture.Width;
+-				sourceY = sourceRectangle.Value.Y / (float) texture.Height;
+-				sourceW = sourceRectangle.Value.Width / (float) texture.Width;
+-				sourceH = sourceRectangle.Value.Height / (float) texture.Height;
++				Rectangle srcRect = sourceRectangle.Value; // Vita port: one Nullable.Value call
++				sourceX = srcRect.X / (float) texture.Width;
++				sourceY = srcRect.Y / (float) texture.Height;
++				sourceW = srcRect.Width / (float) texture.Width;
++				sourceH = srcRect.Height / (float) texture.Height;
+ 			}
+ 			else
+ 			{
+@@ -638,16 +708,11 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			float sourceX, sourceY, sourceW, sourceH;
+ 			if (sourceRectangle.HasValue)
+ 			{
+-				sourceX = sourceRectangle.Value.X / (float) texture.Width;
+-				sourceY = sourceRectangle.Value.Y / (float) texture.Height;
+-				sourceW = Math.Sign(sourceRectangle.Value.Width) * Math.Max(
+-					Math.Abs(sourceRectangle.Value.Width),
+-					MathHelper.FloatEpsilon
+-				) / (float) texture.Width;
+-				sourceH = Math.Sign(sourceRectangle.Value.Height) * Math.Max(
+-					Math.Abs(sourceRectangle.Value.Height),
+-					MathHelper.FloatEpsilon
+-				) / (float) texture.Height;
++				Rectangle srcRect = sourceRectangle.Value; // Vita port: one Nullable.Value call
++				sourceX = srcRect.X / (float) texture.Width;
++				sourceY = srcRect.Y / (float) texture.Height;
++				sourceW = (srcRect.Width > 0 ? (float) srcRect.Width : Math.Sign(srcRect.Width) * Math.Max(Math.Abs(srcRect.Width), MathHelper.FloatEpsilon)) / (float) texture.Width;
++				sourceH = (srcRect.Height > 0 ? (float) srcRect.Height : Math.Sign(srcRect.Height) * Math.Max(Math.Abs(srcRect.Height), MathHelper.FloatEpsilon)) / (float) texture.Height;
+ 			}
+ 			else
+ 			{
+@@ -667,15 +732,127 @@ namespace Microsoft.Xna.Framework.Graphics
+ 				destinationRectangle.Width,
+ 				destinationRectangle.Height,
+ 				color,
+-				origin.X / sourceW / (float) texture.Width,
+-				origin.Y / sourceH / (float) texture.Height,
+-				(float) Math.Sin(rotation),
+-				(float) Math.Cos(rotation),
++				(origin.X == 0f) ? 0f : origin.X / sourceW / (float) texture.Width, // Vita port: skip two divisions for a zero origin
++				(origin.Y == 0f) ? 0f : origin.Y / sourceH / (float) texture.Height,
++				(rotation == 0f) ? 0f : (float) Math.Sin(rotation), // Vita port: most sprites are unrotated
++				(rotation == 0f) ? 1f : (float) Math.Cos(rotation),
+ 				layerDepth,
+ 				(int) (effects & (SpriteEffects) 0x03)
+ 			);
+ 		}
+ 
++		/* Vita port: lean path for xTile's map tiles (LowRamDisplayDevice). It queues the same sprite as
++		 * Draw(texture, new Vector2(x, y), sourceRectangle, color, 0f, Vector2.Zero, scale, SpriteEffects.None, layerDepth)
++		 * but the caller hands over the source rectangle already in texture coordinates (sourceX/Y/W/H, from the
++		 * same float divisions Draw does) and the destination size (scale * rectangle size). That skips the
++		 * nullable rectangle, the per-sprite divisions, Sign/Abs/Max, the origin/rotation terms and PushSprite's
++		 * 16 arguments. sourceW and sourceH must be positive.
++		 */
++		public unsafe void DrawTileEXT(
++			Texture2D texture,
++			float x,
++			float y,
++			float sourceX,
++			float sourceY,
++			float sourceW,
++			float sourceH,
++			float destW,
++			float destH,
++			Color color,
++			float layerDepth
++		) {
++			if (texture == null)
++			{
++				throw new ArgumentNullException("texture", "This method does not accept null for this parameter.");
++			}
++			CheckBegin();
++			SpriteSortMode mode = sortMode;
++			if (mode == SpriteSortMode.Immediate)
++			{
++				PushSprite(
++					texture,
++					sourceX,
++					sourceY,
++					sourceW,
++					sourceH,
++					x,
++					y,
++					destW,
++					destH,
++					color,
++					0.0f,
++					0.0f,
++					0.0f,
++					1.0f,
++					layerDepth,
++					0
++				);
++				return;
++			}
++			if (numSprites >= vertexInfo.Length)
++			{
++				MakeRoom();
++			}
++			if (mode == SpriteSortMode.Deferred)
++			{
++				fixed (VertexPositionColorTexture4* sprite = &vertexInfo[numSprites])
++				{
++					float x1 = destW + x;
++					float y1 = destH + y;
++					float u1 = sourceW + sourceX;
++					float v1 = sourceH + sourceY;
++					sprite->Position0.X = x;
++					sprite->Position0.Y = y;
++					sprite->Position1.X = x1;
++					sprite->Position1.Y = y;
++					sprite->Position2.X = x;
++					sprite->Position2.Y = y1;
++					sprite->Position3.X = x1;
++					sprite->Position3.Y = y1;
++					sprite->TextureCoordinate0.X = sourceX;
++					sprite->TextureCoordinate0.Y = sourceY;
++					sprite->TextureCoordinate1.X = u1;
++					sprite->TextureCoordinate1.Y = sourceY;
++					sprite->TextureCoordinate2.X = sourceX;
++					sprite->TextureCoordinate2.Y = v1;
++					sprite->TextureCoordinate3.X = u1;
++					sprite->TextureCoordinate3.Y = v1;
++					sprite->Position0.Z = layerDepth;
++					sprite->Position1.Z = layerDepth;
++					sprite->Position2.Z = layerDepth;
++					sprite->Position3.Z = layerDepth;
++					sprite->Color0 = color;
++					sprite->Color1 = color;
++					sprite->Color2 = color;
++					sprite->Color3 = color;
++				}
++			}
++			else
++			{
++				fixed (SpriteInfo* spriteInfo = &spriteInfos[numSprites])
++				{
++					spriteInfo->textureHash = (mode == SpriteSortMode.Texture) ? TextureHash(texture) : 0;
++					spriteInfo->sourceX = sourceX;
++					spriteInfo->sourceY = sourceY;
++					spriteInfo->sourceW = sourceW;
++					spriteInfo->sourceH = sourceH;
++					spriteInfo->destinationX = x;
++					spriteInfo->destinationY = y;
++					spriteInfo->destinationW = destW;
++					spriteInfo->destinationH = destH;
++					spriteInfo->color = color;
++					spriteInfo->originX = 0.0f;
++					spriteInfo->originY = 0.0f;
++					spriteInfo->rotationSin = 0.0f;
++					spriteInfo->rotationCos = 1.0f;
++					spriteInfo->depth = layerDepth;
++					spriteInfo->effects = 0;
++				}
++			}
++			textureInfo[numSprites].tex = texture;
++			numSprites += 1;
++		}
++
+ 		#endregion
+ 
+ 		#region Public DrawString Methods
+@@ -874,8 +1051,8 @@ namespace Microsoft.Xna.Framework.Graphics
+ 					color,
+ 					offsetX / sourceW / (float) textureValue.Width,
+ 					offsetY / sourceH / (float) textureValue.Height,
+-					(float) Math.Sin(rotation),
+-					(float) Math.Cos(rotation),
++					(rotation == 0f) ? 0f : (float) Math.Sin(rotation), // Vita port: most sprites are unrotated
++					(rotation == 0f) ? 1f : (float) Math.Cos(rotation),
+ 					layerDepth,
+ 					(int) effects
+ 				);
+@@ -1070,8 +1247,8 @@ namespace Microsoft.Xna.Framework.Graphics
+ 					color,
+ 					offsetX / sourceW / (float) textureValue.Width,
+ 					offsetY / sourceH / (float) textureValue.Height,
+-					(float) Math.Sin(rotation),
+-					(float) Math.Cos(rotation),
++					(rotation == 0f) ? 0f : (float) Math.Sin(rotation), // Vita port: most sprites are unrotated
++					(rotation == 0f) ? 1f : (float) Math.Cos(rotation),
+ 					layerDepth,
+ 					(int) effects
+ 				);
+@@ -1087,6 +1264,44 @@ namespace Microsoft.Xna.Framework.Graphics
+ 
+ 		#region Private Methods
+ 
++		// Vita port: PushSprite's "out of room" block, shared with DrawTileEXT.
++		private void MakeRoom()
++		{
++			if (vertexInfo.Length >= MAX_ARRAYSIZE)
++			{
++				/* FIXME: We're doing this for safety but it's possible that
++				 * XNA just keeps expanding and crashes with OutOfMemory.
++				 * Since GraphicsProfile has a buffer cap, we use that for safety.
++				 * This might change if someone depends on running out of memory(?!).
++				 */
++				FlushBatch();
++			}
++			else
++			{
++				/* We're out of room, add another batch max
++				 * to the total array size. This is required for
++				 * sprite sorting accuracy; note that we do NOT
++				 * increase the graphics buffer sizes!
++				 * -flibit
++				 */
++				int newMax = Math.Min(vertexInfo.Length * 2, MAX_ARRAYSIZE);
++				Array.Resize(ref vertexInfo, newMax);
++				Array.Resize(ref textureInfo, newMax);
++				Array.Resize(ref spriteInfos, newMax);
++			}
++		}
++
++		// Vita port: the texture hash is only a sort key for SpriteSortMode.Texture.
++		private int TextureHash(Texture2D texture)
++		{
++			if (texture != hashTexture)
++			{
++				hashTexture = texture;
++				hashValue = texture.GetHashCode();
++			}
++			return hashValue;
++		}
++
+ 		private unsafe void PushSprite(
+ 			Texture2D texture,
+ 			float sourceX,
+@@ -1107,29 +1322,34 @@ namespace Microsoft.Xna.Framework.Graphics
+ 		) {
+ 			if (numSprites >= vertexInfo.Length)
+ 			{
+-				if (vertexInfo.Length >= MAX_ARRAYSIZE)
++				MakeRoom();
++			}
++
++			if (vitaSnapScale > 0f && rotationSin == 0f)
++			{
++				float s = vitaSnapScale;
++				/* The sprite's top left corner goes on a whole pixel, origin included: snapping only the
++				 * position left a sprite whose origin is not whole real pixels (grass tufts' 7.5 x 17.5
++				 * texels at 100%: 52.5 pixels up) with its texel edges on pixel centers, and its top row
++				 * showed the frame above it in the sheet as a thin line.
++				 */
++				float ox = originX * destinationW;
++				float oy = originY * destinationH;
++				// Round half up with integer conversions (Math.Floor through double was ~2% of a frame).
++				float vx = (destinationX - ox) * s + 0.5f;
++				float vy = (destinationY - oy) * s + 0.5f;
++				int ix = (int) vx;
++				int iy = (int) vy;
++				if (vx < ix)
+ 				{
+-					/* FIXME: We're doing this for safety but it's possible that
+-					 * XNA just keeps expanding and crashes with OutOfMemory.
+-					 * Since GraphicsProfile has a buffer cap, we use that for safety.
+-					 * This might change if someone depends on running out of memory(?!).
+-					 */
+-					FlushBatch();
++					ix -= 1;
+ 				}
+-				else
++				if (vy < iy)
+ 				{
+-					/* We're out of room, add another batch max
+-					 * to the total array size. This is required for
+-					 * sprite sorting accuracy; note that we do NOT
+-					 * increase the graphics buffer sizes!
+-					 * -flibit
+-					 */
+-					int newMax = Math.Min(vertexInfo.Length * 2, MAX_ARRAYSIZE);
+-					Array.Resize(ref vertexInfo, newMax);
+-					Array.Resize(ref textureInfo, newMax);
+-					Array.Resize(ref spriteInfos, newMax);
+-					Array.Resize(ref sortedSpriteInfos, newMax);
++					iy -= 1;
+ 				}
++				destinationX = ix / s + ox;
++				destinationY = iy / s + oy;
+ 			}
+ 
+ 			if (sortMode == SpriteSortMode.Immediate)
+@@ -1205,14 +1425,14 @@ namespace Microsoft.Xna.Framework.Graphics
+ 					);
+ 				}
+ 
+-				textureInfo[numSprites] = texture;
++				textureInfo[numSprites].tex = texture;
+ 				numSprites += 1;
+ 			}
+ 			else
+ 			{
+ 				fixed (SpriteInfo* spriteInfo = &spriteInfos[numSprites])
+ 				{
+-					spriteInfo->textureHash = texture.GetHashCode();
++					spriteInfo->textureHash = (sortMode == SpriteSortMode.Texture) ? TextureHash(texture) : 0; // Vita port: only Texture mode reads it
+ 					spriteInfo->sourceX = sourceX;
+ 					spriteInfo->sourceY = sourceY;
+ 					spriteInfo->sourceW = sourceW;
+@@ -1230,7 +1450,7 @@ namespace Microsoft.Xna.Framework.Graphics
+ 					spriteInfo->effects = effects;
+ 				}
+ 
+-				textureInfo[numSprites] = texture;
++				textureInfo[numSprites].tex = texture;
+ 				numSprites += 1;
+ 			}
+ 		}
+@@ -1245,76 +1465,201 @@ namespace Microsoft.Xna.Framework.Graphics
+ 				return;
+ 			}
+ 
++			if (vitaNativeFlush && customEffect == null)
++			{
++				VitaFlushNative();
++				return;
++			}
++
++			int[] order = null;
+ 			if (sortMode != SpriteSortMode.Deferred)
+ 			{
+-				IComparer<IntPtr> comparer;
+-				if (sortMode == SpriteSortMode.Texture)
++				/* Vita port: stable LSD radix sort on (key, submission index) replaces Array.Sort with an
++				 * IComparer. Key maps are monotone with the old comparers (float.CompareTo / int.CompareTo,
++				 * descending for BackToFront), ties keep submission order exactly like fna-stable-sprite-sort.patch.
++				 * Textures are no longer permuted; they are read through the order array.
++				 * The four byte histograms are counted in the key loop (one pass instead of four), a batch whose
++				 * keys already ascend is not sorted at all (order stays null: submission order is the sort order),
++				 * and the passes run on pinned pointers so they carry no bounds checks. */
++				int n = numSprites;
++				if (sortKeys == null || sortKeys.Length < n)
+ 				{
+-					comparer = TextureCompare;
++					sortKeys = new uint[n];
++					sortKeysTmp = new uint[n];
++					sortOrder = new int[n];
++					sortOrderTmp = new int[n];
+ 				}
+-				else if (sortMode == SpriteSortMode.BackToFront)
++				uint[] keys = sortKeys;
++				uint[] keysTmp = sortKeysTmp;
++				int[] ord = sortOrder;
++				int[] ordTmp = sortOrderTmp;
++				SpriteSortMode mode = sortMode;
++				int* counts = stackalloc int[1024];
++				for (int i = 0; i < 1024; i += 1)
+ 				{
+-					comparer = BackToFrontCompare;
++					counts[i] = 0;
+ 				}
+-				else
++				bool ascending = true;
++				uint prevKey = 0;
++				fixed (SpriteInfo* spriteInfo = &spriteInfos[0])
++				fixed (uint* pKeys = keys)
+ 				{
+-					comparer = FrontToBackCompare;
++					for (int i = 0; i < n; i += 1)
++					{
++						uint k;
++						if (mode == SpriteSortMode.Texture)
++						{
++							k = (uint) spriteInfo[i].textureHash ^ 0x80000000u;
++						}
++						else
++						{
++							float d = spriteInfo[i].depth;
++							if (d != d)
++							{
++								k = 0; // NaN sorts below everything, equal to itself
++							}
++							else
++							{
++								if (d == 0.0f)
++								{
++									d = 0.0f; // -0 == +0
++								}
++								int bits = *(int*) &d;
++								k = (uint) (bits < 0 ? ~bits : bits | int.MinValue);
++								// k >= 1 for non-NaN, so NaN (0) is the minimum
++							}
++							if (mode == SpriteSortMode.BackToFront)
++							{
++								k = ~k; // descending depth
++							}
++						}
++						pKeys[i] = k;
++						if (k < prevKey)
++						{
++							ascending = false;
++						}
++						prevKey = k;
++						counts[k & 0xFF] += 1;
++						counts[256 + ((k >> 8) & 0xFF)] += 1;
++						counts[512 + ((k >> 16) & 0xFF)] += 1;
++						counts[768 + (k >> 24)] += 1;
++					}
+ 				}
+-				fixed (SpriteInfo* spriteInfo = &spriteInfos[0]) {
+-				fixed (IntPtr* sortedSpriteInfo = &sortedSpriteInfos[0]) {
++				if (!ascending)
++				{
++					uint firstKey = keys[0];
++					bool first = true;
++					bool flipped = false;
++					fixed (uint* pKeysA = keys)
++					fixed (uint* pKeysB = keysTmp)
++					fixed (int* pOrdA = ord)
++					fixed (int* pOrdB = ordTmp)
++					{
++						uint* kSrc = pKeysA;
++						uint* kDst = pKeysB;
++						int* oSrc = pOrdA;
++						int* oDst = pOrdB;
++						for (int shift = 0; shift < 32; shift += 8)
++						{
++							int* c = counts + (shift << 5); // shift / 8 * 256
++							if (c[(firstKey >> shift) & 0xFF] == n)
++							{
++								continue; // all keys share this byte
++							}
++							int sum = 0;
++							for (int i = 0; i < 256; i += 1)
++							{
++								int cnt = c[i];
++								c[i] = sum;
++								sum += cnt;
++							}
++							if (first)
++							{
++								// ord is still the identity: index i is the order entry
++								for (int i = 0; i < n; i += 1)
++								{
++									uint k = kSrc[i];
++									int dst = c[(k >> shift) & 0xFF]++;
++									kDst[dst] = k;
++									oDst[dst] = i;
++								}
++								first = false;
++							}
++							else
++							{
++								for (int i = 0; i < n; i += 1)
++								{
++									uint k = kSrc[i];
++									int dst = c[(k >> shift) & 0xFF]++;
++									kDst[dst] = k;
++									oDst[dst] = oSrc[i];
++								}
++							}
++							uint* tk = kSrc; kSrc = kDst; kDst = tk;
++							int* to = oSrc; oSrc = oDst; oDst = to;
++							flipped = !flipped;
++						}
++					}
++					if (!first)
++					{
++						order = flipped ? ordTmp : ord;
++					}
++				}
++				fixed (SpriteInfo* spriteInfo2 = &spriteInfos[0])
+ 				fixed (VertexPositionColorTexture4* sprites = &vertexInfo[0])
+ 				{
+-					for (int i = 0; i < numSprites; i += 1)
++					if (order == null)
+ 					{
+-						sortedSpriteInfo[i] = (IntPtr) (&spriteInfo[i]);
++						for (int i = 0; i < n; i += 1)
++						{
++							GenerateVertexInfo(&spriteInfo2[i], &sprites[i]);
++						}
+ 					}
+-					Array.Sort(
+-						sortedSpriteInfos,
+-						textureInfo,
+-						0,
+-						numSprites,
+-						comparer
+-					);
+-					for (int i = 0; i < numSprites; i += 1)
++					else
+ 					{
+-						SpriteInfo* info = (SpriteInfo*) sortedSpriteInfo[i];
+-						GenerateVertexInfo(
+-							&sprites[i],
+-							info->sourceX,
+-							info->sourceY,
+-							info->sourceW,
+-							info->sourceH,
+-							info->destinationX,
+-							info->destinationY,
+-							info->destinationW,
+-							info->destinationH,
+-							info->color,
+-							info->originX,
+-							info->originY,
+-							info->rotationSin,
+-							info->rotationCos,
+-							info->depth,
+-							info->effects
+-						);
++						fixed (int* pOrder = order)
++						{
++							for (int i = 0; i < n; i += 1)
++							{
++								GenerateVertexInfo(&spriteInfo2[pOrder[i]], &sprites[i]);
++							}
++						}
+ 					}
+-				}}}
++				}
+ 			}
+ 
++			TexRef[] texInfo = textureInfo;
+ 			int arrayOffset = 0;
+ 		nextbatch:
+ 			int batchSize = Math.Min(numSprites, MAX_SPRITES);
+ 			int baseOff = UpdateVertexBuffer(arrayOffset, batchSize);
+ 			int offset = 0;
+ 
+-			Texture2D curTexture = textureInfo[arrayOffset];
+-			for (int i = 1; i < batchSize; i += 1)
++			Texture2D curTexture = order != null ? texInfo[order[arrayOffset]].tex : texInfo[arrayOffset].tex;
++			if (order != null)
++			{
++				for (int i = 1; i < batchSize; i += 1)
++				{
++					Texture2D tex = texInfo[order[arrayOffset + i]].tex;
++					if (tex != curTexture)
++					{
++						DrawPrimitives(curTexture, baseOff + offset, i - offset);
++						curTexture = tex;
++						offset = i;
++					}
++				}
++			}
++			else
+ 			{
+-				Texture2D tex = textureInfo[arrayOffset + i];
+-				if (tex != curTexture)
++				for (int i = 1; i < batchSize; i += 1)
+ 				{
+-					DrawPrimitives(curTexture, baseOff + offset, i - offset);
+-					curTexture = tex;
+-					offset = i;
++					Texture2D tex = texInfo[arrayOffset + i].tex;
++					if (tex != curTexture)
++					{
++						DrawPrimitives(curTexture, baseOff + offset, i - offset);
++						curTexture = tex;
++						offset = i;
++					}
+ 				}
+ 			}
+ 			DrawPrimitives(curTexture, baseOff + offset, batchSize - offset);
+@@ -1366,6 +1711,85 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			return offset;
+ 		}
+ 
++		/* Vita port: vertices of one queued SpriteInfo. The common sprite (no rotation, no flip) is written
++		 * straight from the info without the 16-argument call. */
++		private static unsafe void GenerateVertexInfo(
++			SpriteInfo* info,
++			VertexPositionColorTexture4* sprite
++		) {
++			if (info->rotationSin == 0f && info->rotationCos == 1f && info->effects == 0)
++			{
++				float x0, y0, x1, y1;
++				float originX = info->originX;
++				float originY = info->originY;
++				float destinationW = info->destinationW;
++				float destinationH = info->destinationH;
++				if (originX == 0f && originY == 0f)
++				{
++					x0 = info->destinationX;
++					y0 = info->destinationY;
++					x1 = destinationW + x0;
++					y1 = destinationH + y0;
++				}
++				else
++				{
++					x0 = (-originX * destinationW) + info->destinationX;
++					y0 = (-originY * destinationH) + info->destinationY;
++					x1 = ((1.0f - originX) * destinationW) + info->destinationX;
++					y1 = ((1.0f - originY) * destinationH) + info->destinationY;
++				}
++				float u0 = info->sourceX;
++				float v0 = info->sourceY;
++				float u1 = info->sourceW + u0;
++				float v1 = info->sourceH + v0;
++				float depth = info->depth;
++				Color color = info->color;
++				sprite->Position0.X = x0;
++				sprite->Position0.Y = y0;
++				sprite->Position0.Z = depth;
++				sprite->Color0 = color;
++				sprite->TextureCoordinate0.X = u0;
++				sprite->TextureCoordinate0.Y = v0;
++				sprite->Position1.X = x1;
++				sprite->Position1.Y = y0;
++				sprite->Position1.Z = depth;
++				sprite->Color1 = color;
++				sprite->TextureCoordinate1.X = u1;
++				sprite->TextureCoordinate1.Y = v0;
++				sprite->Position2.X = x0;
++				sprite->Position2.Y = y1;
++				sprite->Position2.Z = depth;
++				sprite->Color2 = color;
++				sprite->TextureCoordinate2.X = u0;
++				sprite->TextureCoordinate2.Y = v1;
++				sprite->Position3.X = x1;
++				sprite->Position3.Y = y1;
++				sprite->Position3.Z = depth;
++				sprite->Color3 = color;
++				sprite->TextureCoordinate3.X = u1;
++				sprite->TextureCoordinate3.Y = v1;
++				return;
++			}
++			GenerateVertexInfo(
++				sprite,
++				info->sourceX,
++				info->sourceY,
++				info->sourceW,
++				info->sourceH,
++				info->destinationX,
++				info->destinationY,
++				info->destinationW,
++				info->destinationH,
++				info->color,
++				info->originX,
++				info->originY,
++				info->rotationSin,
++				info->rotationCos,
++				info->depth,
++				info->effects
++			);
++		}
++
+ 		private static unsafe void GenerateVertexInfo(
+ 			VertexPositionColorTexture4* sprite,
+ 			float sourceX,
+@@ -1384,66 +1808,114 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			float depth,
+ 			int effects
+ 		) {
+-			float cornerX = -originX * destinationW;
+-			float cornerY = -originY * destinationH;
+-			sprite->Position0.X = (
+-				(-rotationSin * cornerY) +
+-				(rotationCos * cornerX) +
+-				destinationX
+-			);
+-			sprite->Position0.Y = (
+-				(rotationCos * cornerY) +
+-				(rotationSin * cornerX) +
+-				destinationY
+-			);
+-			cornerX = (1.0f - originX) * destinationW;
+-			cornerY = -originY * destinationH;
+-			sprite->Position1.X = (
+-				(-rotationSin * cornerY) +
+-				(rotationCos * cornerX) +
+-				destinationX
+-			);
+-			sprite->Position1.Y = (
+-				(rotationCos * cornerY) +
+-				(rotationSin * cornerX) +
+-				destinationY
+-			);
+-			cornerX = -originX * destinationW;
+-			cornerY = (1.0f - originY) * destinationH;
+-			sprite->Position2.X = (
+-				(-rotationSin * cornerY) +
+-				(rotationCos * cornerX) +
+-				destinationX
+-			);
+-			sprite->Position2.Y = (
+-				(rotationCos * cornerY) +
+-				(rotationSin * cornerX) +
+-				destinationY
+-			);
+-			cornerX = (1.0f - originX) * destinationW;
+-			cornerY = (1.0f - originY) * destinationH;
+-			sprite->Position3.X = (
+-				(-rotationSin * cornerY) +
+-				(rotationCos * cornerX) +
+-				destinationX
+-			);
+-			sprite->Position3.Y = (
+-				(rotationCos * cornerY) +
+-				(rotationSin * cornerX) +
+-				destinationY
+-			);
+-			fixed (float* flipX = &CornerOffsetX[0]) {
+-			fixed (float* flipY = &CornerOffsetY[0])
+-			{
+-				sprite->TextureCoordinate0.X = (flipX[0 ^ effects] * sourceW) + sourceX;
+-				sprite->TextureCoordinate0.Y = (flipY[0 ^ effects] * sourceH) + sourceY;
+-				sprite->TextureCoordinate1.X = (flipX[1 ^ effects] * sourceW) + sourceX;
+-				sprite->TextureCoordinate1.Y = (flipY[1 ^ effects] * sourceH) + sourceY;
+-				sprite->TextureCoordinate2.X = (flipX[2 ^ effects] * sourceW) + sourceX;
+-				sprite->TextureCoordinate2.Y = (flipY[2 ^ effects] * sourceH) + sourceY;
+-				sprite->TextureCoordinate3.X = (flipX[3 ^ effects] * sourceW) + sourceX;
+-				sprite->TextureCoordinate3.Y = (flipY[3 ^ effects] * sourceH) + sourceY;
+-			}}
++			if (rotationSin == 0f && rotationCos == 1f)
++			{
++				/* Vita port: with sin = 0 and cos = 1 every rotation term is exactly +-0 or the corner itself,
++				 * so each position is corner + destination (only the sign of a zero could differ). */
++				float x0, y0, x1, y1;
++				if (originX == 0f && originY == 0f)
++				{
++					x0 = destinationX;
++					y0 = destinationY;
++					x1 = destinationW + destinationX;
++					y1 = destinationH + destinationY;
++				}
++				else
++				{
++					x0 = (-originX * destinationW) + destinationX;
++					y0 = (-originY * destinationH) + destinationY;
++					x1 = ((1.0f - originX) * destinationW) + destinationX;
++					y1 = ((1.0f - originY) * destinationH) + destinationY;
++				}
++				sprite->Position0.X = x0;
++				sprite->Position0.Y = y0;
++				sprite->Position1.X = x1;
++				sprite->Position1.Y = y0;
++				sprite->Position2.X = x0;
++				sprite->Position2.Y = y1;
++				sprite->Position3.X = x1;
++				sprite->Position3.Y = y1;
++			}
++			else
++			{
++				float cornerX = -originX * destinationW;
++				float cornerY = -originY * destinationH;
++				sprite->Position0.X = (
++					(-rotationSin * cornerY) +
++					(rotationCos * cornerX) +
++					destinationX
++				);
++				sprite->Position0.Y = (
++					(rotationCos * cornerY) +
++					(rotationSin * cornerX) +
++					destinationY
++				);
++				cornerX = (1.0f - originX) * destinationW;
++				cornerY = -originY * destinationH;
++				sprite->Position1.X = (
++					(-rotationSin * cornerY) +
++					(rotationCos * cornerX) +
++					destinationX
++				);
++				sprite->Position1.Y = (
++					(rotationCos * cornerY) +
++					(rotationSin * cornerX) +
++					destinationY
++				);
++				cornerX = -originX * destinationW;
++				cornerY = (1.0f - originY) * destinationH;
++				sprite->Position2.X = (
++					(-rotationSin * cornerY) +
++					(rotationCos * cornerX) +
++					destinationX
++				);
++				sprite->Position2.Y = (
++					(rotationCos * cornerY) +
++					(rotationSin * cornerX) +
++					destinationY
++				);
++				cornerX = (1.0f - originX) * destinationW;
++				cornerY = (1.0f - originY) * destinationH;
++				sprite->Position3.X = (
++					(-rotationSin * cornerY) +
++					(rotationCos * cornerX) +
++					destinationX
++				);
++				sprite->Position3.Y = (
++					(rotationCos * cornerY) +
++					(rotationSin * cornerX) +
++					destinationY
++				);
++			}
++			if (effects == 0)
++			{
++				// Vita port: no flip, so the corner offsets are 0 / 1 (0 * w + x is x, 1 * w + x is w + x).
++				float u1 = sourceW + sourceX;
++				float v1 = sourceH + sourceY;
++				sprite->TextureCoordinate0.X = sourceX;
++				sprite->TextureCoordinate0.Y = sourceY;
++				sprite->TextureCoordinate1.X = u1;
++				sprite->TextureCoordinate1.Y = sourceY;
++				sprite->TextureCoordinate2.X = sourceX;
++				sprite->TextureCoordinate2.Y = v1;
++				sprite->TextureCoordinate3.X = u1;
++				sprite->TextureCoordinate3.Y = v1;
++			}
++			else
++			{
++				fixed (float* flipX = &CornerOffsetX[0]) {
++				fixed (float* flipY = &CornerOffsetY[0])
++				{
++					sprite->TextureCoordinate0.X = (flipX[0 ^ effects] * sourceW) + sourceX;
++					sprite->TextureCoordinate0.Y = (flipY[0 ^ effects] * sourceH) + sourceY;
++					sprite->TextureCoordinate1.X = (flipX[1 ^ effects] * sourceW) + sourceX;
++					sprite->TextureCoordinate1.Y = (flipY[1 ^ effects] * sourceH) + sourceY;
++					sprite->TextureCoordinate2.X = (flipX[2 ^ effects] * sourceW) + sourceX;
++					sprite->TextureCoordinate2.Y = (flipY[2 ^ effects] * sourceH) + sourceY;
++					sprite->TextureCoordinate3.X = (flipX[3 ^ effects] * sourceW) + sourceX;
++					sprite->TextureCoordinate3.Y = (flipY[3 ^ effects] * sourceH) + sourceY;
++				}}
++			}
+ 			sprite->Position0.Z = depth;
+ 			sprite->Position1.Z = depth;
+ 			sprite->Position2.Z = depth;
+@@ -1469,6 +1941,18 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			// Inlined CreateOrthographicOffCenter * transformMatrix
+ 			float tfWidth = (float) (2.0 / (double) viewport.Width);
+ 			float tfHeight = (float) (-2.0 / (double) viewport.Height);
++			if (GraphicsDevice.VitaVirtual)
++			{
++				/* Vita port: the virtual back buffer (GraphicsDevice.VitaBackBufferScale) onto the real
++				 * one, from the real size and the exact scale: the virtual size is rounded up to whole
++				 * pixels (544 / 0.75 = 725.3), which would scale by a hair less and put texel edges
++				 * on pixel centers.
++				 */
++				Viewport real = GraphicsDevice.VitaRealViewport;
++				double scale = GraphicsDevice.VitaBackBufferScale;
++				tfWidth = (float) (2.0 * scale / (double) real.Width);
++				tfHeight = (float) (-2.0 * scale / (double) real.Height);
++			}
+ 			unsafe
+ 			{
+ 				float* dstPtr = (float*) spriteMatrixTransform;
+@@ -1618,13 +2102,24 @@ namespace Microsoft.Xna.Framework.Graphics
+ 
+ 		#region Private Sprite Comparison Classes
+ 
++		/* Stardew Valley port: ties keep their submission order. Array.Sort is unstable and the runtimes
++		 * break ties differently, so on Mono sprites drawn at the same depth after a menu background
++		 * (text boxes, labels) ended up under it. The entries point into spriteInfos, which is in
++		 * submission order, so comparing the pointers orders the ties by submission.
++		 */
++		private static int SubmissionOrder(IntPtr i1, IntPtr i2)
++		{
++			return ((long) i1).CompareTo((long) i2);
++		}
++
+ 		private class TextureComparer : IComparer<IntPtr>
+ 		{
+ 			public unsafe int Compare(IntPtr i1, IntPtr i2)
+ 			{
+ 				SpriteInfo* p1 = (SpriteInfo*) i1;
+ 				SpriteInfo* p2 = (SpriteInfo*) i2;
+-				return p1->textureHash.CompareTo(p2->textureHash);
++				int result = p1->textureHash.CompareTo(p2->textureHash);
++				return result != 0 ? result : SubmissionOrder(i1, i2);
+ 			}
+ 		}
+ 
+@@ -1634,7 +2129,8 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			{
+ 				SpriteInfo* p1 = (SpriteInfo*) i1;
+ 				SpriteInfo* p2 = (SpriteInfo*) i2;
+-				return p2->depth.CompareTo(p1->depth);
++				int result = p2->depth.CompareTo(p1->depth);
++				return result != 0 ? result : SubmissionOrder(i1, i2);
+ 			}
+ 		}
+ 
+@@ -1644,7 +2140,8 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			{
+ 				SpriteInfo* p1 = (SpriteInfo*) i1;
+ 				SpriteInfo* p2 = (SpriteInfo*) i2;
+-				return p1->depth.CompareTo(p2->depth);
++				int result = p1->depth.CompareTo(p2->depth);
++				return result != 0 ? result : SubmissionOrder(i1, i2);
+ 			}
+ 		}
+ 

@@ -1,0 +1,15 @@
+diff --git a/NetPeer.cs b/NetPeer.cs
+index 199d6017bcbc5ff49cf09103d06b109ed926f99c..37242082f58d9a6dc6dd7aa533a616d470b89233 100644
+--- a/NetPeer.cs
++++ b/NetPeer.cs
+@@ -969,7 +969,9 @@ public class NetPeer
+ 				}
+ 			}
+ 		}
+-		while (m_socket.Available > 0);
++		// The Vita Mono ioctl shim cannot implement Socket.Available (FIONREAD).
++		// Poll is already used above; zero timeout drains queued datagrams without waiting.
++		while (m_socket.Poll(0, SelectMode.SelectRead));
+ 	}
+ 
+ 	public void FlushSendQueue()

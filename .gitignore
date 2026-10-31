@@ -1,0 +1,4 @@
+work/
+builder/bin/
+builder/obj/
+__pycache__/

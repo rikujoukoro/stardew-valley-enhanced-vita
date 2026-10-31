@@ -1,0 +1,30 @@
+diff --git a/StardewValley/LocalMultiplayer.cs b/StardewValley/LocalMultiplayer.cs
+index c4df2934c64c52e7a253f9e07723c66a1785cee8..6c637542f73939a6e8c86477227744b8ec3d8477 100644
+--- a/StardewValley/LocalMultiplayer.cs
++++ b/StardewValley/LocalMultiplayer.cs
+@@ -28,6 +28,14 @@ public class LocalMultiplayer
+ 
+ 	public static StaticInstanceMethod StaticLoad;
+ 
++	/// <summary>Port: no split-screen on the Vita (one screen, one controller).</summary>
++	/// <remarks>
++	/// Split-screen swaps every instanced static field between game instances. Finding them reflects over
++	/// every type of every loaded assembly and runs their static constructors: on the Vita that took
++	/// ~160 s and ~36 MB before the first frame, for a feature it cannot use.
++	/// </remarks>
++	public static readonly bool IsSupported = !VitaPlatform.IsVita;
++
+ 	public static bool IsLocalMultiplayer(bool is_local_only = false)
+ 	{
+ 		if (is_local_only)
+@@ -39,6 +47,10 @@ public class LocalMultiplayer
+ 
+ 	public static void Initialize()
+ 	{
++		if (!IsSupported)
++		{
++			return;
++		}
+ 		GetStaticFieldsAndDefaults();
+ 		GenerateDynamicMethodsForStatics();
+ 	}

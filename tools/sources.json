@@ -1,0 +1,95 @@
+{
+  "comment": "Third-party sources the builder downloads. File hashes are of the content with LF line endings.",
+  "pegi12": {
+    "comment": "Official PEGI 12 age label (pegi.info's rating search), drawn on the LiveArea background; downloaded at build time, not distributed.",
+    "url": "https://rating.pegi.info/assets/images/games/age_threshold_icons/12.png",
+    "sha256": "c4e66ba42a4380413c5af5a421e6b1842df9cb2dacc88c18abd0b1ee411048a3"
+  },
+  "fna": {
+    "zip": "https://codeload.github.com/FNA-XNA/FNA/zip/00498b0b81425b14bf8da23e68655215b9b5daa7",
+    "root": "FNA-00498b0b81425b14bf8da23e68655215b9b5daa7",
+    "files": [
+      {
+        "path": "lib/SDL2-CS/src/SDL2.cs",
+        "url": "https://raw.githubusercontent.com/flibitijibibo/SDL2-CS/1eb20e5c690aee9a5188ba9cf06207295c51d935/src/SDL2.cs",
+        "sha256": "ad485b6204b22f97b4e605908e2b95cdaf9a73dad1a77431c40b1d0db68e6455"
+      },
+      {
+        "path": "lib/SDL3-CS/SDL3/SDL3.Legacy.cs",
+        "url": "https://raw.githubusercontent.com/flibitijibibo/SDL3-CS/9bdcf5de2af86bf764a9ca3c42821c1a099ef150/SDL3/SDL3.Legacy.cs",
+        "sha256": "ff0aeb05c0eb698d3b0fab379579e26aaa0efa2a7b32d401abbbf3a149c4dd4b"
+      },
+      {
+        "path": "lib/FAudio/csharp/FAudio.cs",
+        "url": "https://raw.githubusercontent.com/FNA-XNA/FAudio/6839b88e304a046ae1a609ff14a085371e02a4e0/csharp/FAudio.cs",
+        "sha256": "21638c943bf9fa8341ddf8f33761993da5129ebf75b303842988de66b8a5267f"
+      },
+      {
+        "path": "lib/Theorafile/csharp/Theorafile.cs",
+        "url": "https://raw.githubusercontent.com/FNA-XNA/Theorafile/3497e1a3cda1fa1ce79256f20e210fd08aec546f/csharp/Theorafile.cs",
+        "sha256": "8c76605f079f5c29e36e1e5d3f5c3e9c79766a909b5091b3e09babf2f3e5bf06"
+      },
+      {
+        "path": "lib/dav1dfile/csharp/dav1dfile.Legacy.cs",
+        "url": "https://raw.githubusercontent.com/MoonsideGames/dav1dfile/a1377b49d6b69097357618bde87b0294e32dc313/csharp/dav1dfile.Legacy.cs",
+        "sha256": "534f05c474b663c7a5de7b255421af90d256688c8ad9d08a3429211ba4404cec"
+      }
+    ]
+  },
+  "netfx48refs": {
+    "comment": ".NET Framework 4.8 reference assemblies (Microsoft, MIT): where the decompiler finds the game's framework references on every OS. Downloaded at build time, not distributed.",
+    "url": "https://api.nuget.org/v3-flatcontainer/microsoft.netframework.referenceassemblies.net48/1.0.3/microsoft.netframework.referenceassemblies.net48.1.0.3.nupkg",
+    "root": "build/.NETFramework/v4.8",
+    "sha256": "8a7e348538e7eb91351696911689f49e3d4f63f8bab517432bbe159b8b1104a2"
+  },
+  "vitasdk": {
+    "comment": "Official VitaSDK 2026.08 channel (https://vitasdk.org/channels/2026.08.json): the toolchain for the builder's system ('core', SHA-256 as in the channel's x86_64-w64-mingw32.db 7bcba0b8..., x86_64-linux-gnu.db 09616445...) and the Vita libraries the eboot links ('packages', vita.db fdc33838...). Downloaded at build time, not distributed.",
+    "core": {
+      "windows": {
+        "url": "https://github.com/vitasdk/autobuilds/releases/download/sdk-snapshot-20260825.611.1/vitasdk-core-2026.08.1-1-x86_64-w64-mingw32.pkg.tar.xz",
+        "sha256": "1a4104b22addff410db254c88e71a2fec6957498398b0c71f5d6fc8e5618d393"
+      },
+      "linux": {
+        "url": "https://github.com/vitasdk/autobuilds/releases/download/sdk-snapshot-20260825.611.1/vitasdk-core-2026.08.1-1-x86_64-linux-gnu.pkg.tar.xz",
+        "sha256": "db824ae1eeba5ca60990ec0e3459e800657ff5569c852633135a35cd8389b69b"
+      }
+    },
+    "packages": [
+      {
+        "url": "https://github.com/vitasdk/vitasdk-autobuild/releases/download/packages-2026.08-snapshot-20261024.61.1/vitaShaRK-1.7-1-vita.pkg.tar.xz",
+        "sha256": "d41879db12c8e1434dc41d9936b14701a9d064b24b8b1c56a74680099db632a9"
+      },
+      {
+        "url": "https://github.com/vitasdk/vitasdk-autobuild/releases/download/packages-2026.08-snapshot-20261024.61.1/SceShaccCgExt-1.0.1-2-vita.pkg.tar.xz",
+        "sha256": "535bd8d6845d2ec6e9924efba98c1b8cb7432fffdc84ce07dc164442d5cdd148"
+      },
+      {
+        "url": "https://github.com/vitasdk/vitasdk-autobuild/releases/download/packages-2026.08-snapshot-20261024.61.1/libmathneon-0.0.0.r11.g0faab81-1-vita.pkg.tar.xz",
+        "sha256": "a95d46d74f6e7acab5986592aec2432f8395af0975551d29dfe9a04421e25184"
+      },
+      {
+        "url": "https://github.com/vitasdk/vitasdk-autobuild/releases/download/packages-2026.08-snapshot-20261024.61.1/taihen-0.11-1-vita.pkg.tar.xz",
+        "sha256": "93d2075b6b61a164224a2aad651d3d6787f31f3a19c3e2bada7c99844f9fae90"
+      },
+      {
+        "url": "https://github.com/vitasdk/vitasdk-autobuild/releases/download/packages-2026.08-snapshot-20261024.61.1/kubridge-0.0.0.r19.g417ddde-1-vita.pkg.tar.xz",
+        "sha256": "85149ebf0c1c66d0c5ee2071792b594ab1fdcc5bf79e3015d4f44afb917e246b"
+      },
+      {
+        "url": "https://github.com/vitasdk/vitasdk-autobuild/releases/download/packages-2026.08-snapshot-20261024.61.1/zlib-1.3.2-2-vita.pkg.tar.xz",
+        "sha256": "e5b601fe333edb3781c0821c8ea168448d0edb0195362fb391d60e2c0e5d423c"
+      }
+    ]
+  },
+  "toolchain": {
+    "comment": "This project's toolchain zips (vpk/pack-toolchain-zip.sh) from its GitHub release, per system. Until a release has them, pass the zip with --toolchain.",
+    "windows": {
+      "url": "",
+      "sha256": ""
+    },
+    "linux": {
+      "url": "",
+      "sha256": ""
+    }
+  }
+}

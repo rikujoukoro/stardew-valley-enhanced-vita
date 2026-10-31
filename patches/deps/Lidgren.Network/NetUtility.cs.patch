@@ -1,0 +1,54 @@
+diff --git a/NetUtility.cs b/NetUtility.cs
+index ce31140e150c639eafbce98cc502762656cfc7d7..4bfb40d9d80d1e14db4e09a0fe067603bd2e5c49 100644
+--- a/NetUtility.cs
++++ b/NetUtility.cs
+@@ -389,45 +389,14 @@ public static class NetUtility
+ 
+ 	private static NetworkInterface GetNetworkInterface()
+ 	{
+-		if (IPGlobalProperties.GetIPGlobalProperties() == null)
+-		{
+-			return null;
+-		}
+-		NetworkInterface[] allNetworkInterfaces = NetworkInterface.GetAllNetworkInterfaces();
+-		if (allNetworkInterfaces == null || allNetworkInterfaces.Length < 1)
+-		{
+-			return null;
+-		}
+-		NetworkInterface networkInterface = null;
+-		NetworkInterface[] array = allNetworkInterfaces;
+-		foreach (NetworkInterface networkInterface2 in array)
+-		{
+-			if (networkInterface2.NetworkInterfaceType == NetworkInterfaceType.Loopback || networkInterface2.NetworkInterfaceType == NetworkInterfaceType.Unknown || !networkInterface2.Supports(NetworkInterfaceComponent.IPv4))
+-			{
+-				continue;
+-			}
+-			if (networkInterface == null)
+-			{
+-				networkInterface = networkInterface2;
+-			}
+-			if (networkInterface2.OperationalStatus != OperationalStatus.Up)
+-			{
+-				continue;
+-			}
+-			foreach (UnicastIPAddressInformation unicastAddress in networkInterface2.GetIPProperties().UnicastAddresses)
+-			{
+-				if (unicastAddress != null && unicastAddress.Address != null && unicastAddress.Address.AddressFamily == AddressFamily.InterNetwork)
+-				{
+-					return networkInterface2;
+-				}
+-			}
+-		}
+-		return networkInterface;
++		// PS Vita / low-RAM platform safety: NetworkInterface.GetAllNetworkInterfaces()
++		// invokes libc.uname which does not exist as a shared object on PS Vita and throws DllNotFoundException.
++		return null;
+ 	}
+ 
+ 	public static byte[] GetMacAddressBytes()
+ 	{
+-		return GetNetworkInterface()?.GetPhysicalAddress().GetAddressBytes();
++		return new byte[6] { 0x00, 0x1F, 0x32, 0x4A, 0x5B, 0x6C };
+ 	}
+ 
+ 	public static IPAddress GetBroadcastAddress()

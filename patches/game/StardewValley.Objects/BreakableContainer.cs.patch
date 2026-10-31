@@ -1,0 +1,13 @@
+diff --git a/StardewValley.Objects/BreakableContainer.cs b/StardewValley.Objects/BreakableContainer.cs
+index fb92de9d1bf2087f68e1cb3c531a5a7ed2dc5ad6..31539fd273dd0353dfeefaad9634424e0fdfa915 100644
+--- a/StardewValley.Objects/BreakableContainer.cs
++++ b/StardewValley.Objects/BreakableContainer.cs
+@@ -658,7 +658,7 @@ public class BreakableContainer : Object
+ 	{
+ 		if (shakeTimer > 0)
+ 		{
+-			shakeTimer -= time.ElapsedGameTime.Milliseconds;
++			shakeTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 		}
+ 	}
+ 

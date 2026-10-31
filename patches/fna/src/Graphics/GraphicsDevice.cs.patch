@@ -1,0 +1,265 @@
+diff --git a/src/Graphics/GraphicsDevice.cs b/src/Graphics/GraphicsDevice.cs
+index 6174cdda215502482470da8fdf81140e19187dda..17a643b33632da1c9ed94401d157d106f91dfb2a 100644
+--- a/src/Graphics/GraphicsDevice.cs
++++ b/src/Graphics/GraphicsDevice.cs
+@@ -210,6 +210,10 @@ namespace Microsoft.Xna.Framework.Graphics
+ 				{
+ 					throw new ObjectDisposedException(GetType().Name);
+ 				}
++				if (VitaVirtual)
++				{
++					return vitaVirtualScissor;
++				}
+ 				return INTERNAL_scissorRectangle;
+ 			}
+ 			set
+@@ -222,6 +226,12 @@ namespace Microsoft.Xna.Framework.Graphics
+ 				{
+ 					throw new ArgumentException("The scissor rectangle is invalid. The scissor rectangle cannot be larger than or outside of the current render target bounds.", "value");
+ 				}
++				if (VitaVirtual)
++				{
++					// Vita port: virtual back buffer pixels in, real ones to the device.
++					vitaVirtualScissor = value;
++					value = VitaToReal(value);
++				}
+ 				INTERNAL_scissorRectangle = value;
+ 				FNA3D.FNA3D_SetScissorRect(
+ 					GLDevice,
+@@ -230,6 +240,77 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			}
+ 		}
+ 
++		/* Vita port (Stardew Valley): a virtual back buffer. With VitaBackBufferScale s set (0 < s < 1)
++		 * and no render target bound, the back buffer reads as BackBuffer / s pixels: Viewport and
++		 * ScissorRectangle take and give that size and SpriteBatch projects it onto the real back
++		 * buffer. The game zooms out by drawing its world into a render target 1/s times the screen
++		 * and scaling that down; at the zooms where an art pixel covers whole screen pixels it now
++		 * draws the same world straight to the screen - the GPU fills s*s of the pixels and skips the
++		 * copy - while every Viewport-sized rectangle of its drawing code still covers what it did.
++		 * Clear and PresentationParameters stay real, as they were with the render target bound.
++		 */
++		private float vitaBackBufferScale;
++		private Viewport vitaVirtualViewport;
++		private Rectangle vitaVirtualScissor;
++
++		/// <summary>Vita port: see above; 0 (the default) turns it off.</summary>
++		public float VitaBackBufferScale
++		{
++			get
++			{
++				return vitaBackBufferScale;
++			}
++			set
++			{
++				if (value == vitaBackBufferScale)
++				{
++					return;
++				}
++				vitaBackBufferScale = (value > 0f && value < 1f) ? value : 0f;
++				if (renderTargetCount == 0)
++				{
++					// The whole back buffer, in the units now in force.
++					int width = VitaFullSize(PresentationParameters.BackBufferWidth);
++					int height = VitaFullSize(PresentationParameters.BackBufferHeight);
++					Viewport = new Viewport(0, 0, width, height);
++					ScissorRectangle = new Rectangle(0, 0, width, height);
++				}
++			}
++		}
++
++		/// <summary>Vita port: whether Viewport and ScissorRectangle are virtual right now.</summary>
++		internal bool VitaVirtual
++		{
++			get
++			{
++				return vitaBackBufferScale > 0f && renderTargetCount == 0;
++			}
++		}
++
++		/// <summary>Vita port: the viewport the device really has (SpriteBatch's projection).</summary>
++		internal Viewport VitaRealViewport
++		{
++			get
++			{
++				return INTERNAL_viewport;
++			}
++		}
++
++		/// <summary>Vita port: a back buffer size in the units in force (virtual: rounded up, so it covers the screen).</summary>
++		private int VitaFullSize(int real)
++		{
++			return vitaBackBufferScale > 0f ? (int) Math.Ceiling(real / vitaBackBufferScale - 0.001f) : real;
++		}
++
++		private Rectangle VitaToReal(Rectangle r)
++		{
++			int x = (int) Math.Round(r.X * vitaBackBufferScale);
++			int y = (int) Math.Round(r.Y * vitaBackBufferScale);
++			int right = Math.Min((int) Math.Round(r.Right * vitaBackBufferScale), PresentationParameters.BackBufferWidth);
++			int bottom = Math.Min((int) Math.Round(r.Bottom * vitaBackBufferScale), PresentationParameters.BackBufferHeight);
++			return new Rectangle(x, y, Math.Max(right - x, 0), Math.Max(bottom - y, 0));
++		}
++
+ 		/* We have to store this internally because we flip the Viewport for
+ 		 * when we aren't rendering to a target. I'd love to remove this.
+ 		 * -flibit
+@@ -243,6 +324,10 @@ namespace Microsoft.Xna.Framework.Graphics
+ 				{
+ 					throw new ObjectDisposedException(GetType().Name);
+ 				}
++				if (VitaVirtual)
++				{
++					return vitaVirtualViewport;
++				}
+ 				return INTERNAL_viewport;
+ 			}
+ 			set
+@@ -259,6 +344,13 @@ namespace Microsoft.Xna.Framework.Graphics
+ 				{
+ 					throw new ArgumentException("The viewport is invalid. The viewport cannot be larger than or outside of the current render target bounds. The MinDepth and MaxDepth must be between 0 and 1.", "value");
+ 				}
++				if (VitaVirtual)
++				{
++					// Vita port: virtual back buffer pixels in, real ones to the device.
++					vitaVirtualViewport = value;
++					Rectangle real = VitaToReal(value.Bounds);
++					value.Bounds = new Rectangle(real.X, real.Y, Math.Max(real.Width, 1), Math.Max(real.Height, 1));
++				}
+ 				INTERNAL_viewport = value;
+ 				FNA3D.FNA3D_SetViewport(
+ 					GLDevice,
+@@ -382,8 +474,10 @@ namespace Microsoft.Xna.Framework.Graphics
+ 
+ 		#region Internal Sampler Change Queue
+ 
+-		private readonly bool[] modifiedSamplers = new bool[MAX_TEXTURE_SAMPLERS];
+-		private readonly bool[] modifiedVertexSamplers = new bool[MAX_VERTEXTEXTURE_SAMPLERS];
++		// Vita port: collections share a one-int dirty mask. Slot 0 alone takes one iteration,
++		// rather than scanning all 16 slots after nearly every SpriteBatch. No per-draw allocation.
++		private readonly int[] modifiedSamplers = new int[1];
++		private readonly int[] modifiedVertexSamplers = new int[1];
+ 
+ 		#endregion
+ 
+@@ -1177,9 +1271,9 @@ namespace Microsoft.Xna.Framework.Graphics
+ 				for (int i = 0; i < renderTargetCount; i += 1)
+ 				{
+ 					FNA3D.FNA3D_ResolveTarget(GLDevice, ref nativeTargetBindings[i]);
++					renderTargetBindings[i] = default(RenderTargetBinding);
++					nativeTargetBindings[i] = default(FNA3D.FNA3D_RenderTargetBinding);
+ 				}
+-				Array.Clear(renderTargetBindings, 0, renderTargetBindings.Length);
+-				Array.Clear(nativeTargetBindings, 0, nativeTargetBindings.Length);
+ 				renderTargetCount = 0;
+ 			}
+ 			else
+@@ -1241,11 +1335,25 @@ namespace Microsoft.Xna.Framework.Graphics
+ 					}
+ 					FNA3D.FNA3D_ResolveTarget(GLDevice, ref nativeTargetBindings[i]);
+ 				}
+-				Array.Clear(renderTargetBindings, 0, renderTargetBindings.Length);
+-				Array.Copy(renderTargets, renderTargetBindings, renderTargets.Length);
+-				Array.Clear(nativeTargetBindings, 0, nativeTargetBindings.Length);
+-				Array.Copy(nativeTargetBindingsNext, nativeTargetBindings, renderTargets.Length);
+-				renderTargetCount = renderTargets.Length;
++				int newRtLen = renderTargets.Length;
++				for (int i = 0; i < newRtLen; i += 1)
++				{
++					renderTargetBindings[i] = renderTargets[i];
++					nativeTargetBindings[i] = nativeTargetBindingsNext[i];
++				}
++				for (int i = newRtLen; i < renderTargetCount; i += 1)
++				{
++					renderTargetBindings[i] = default(RenderTargetBinding);
++					nativeTargetBindings[i] = default(FNA3D.FNA3D_RenderTargetBinding);
++				}
++				renderTargetCount = newRtLen;
++			}
++
++			// Vita port: the back buffer in virtual pixels while VitaBackBufferScale is set.
++			if (renderTargetCount == 0)
++			{
++				newWidth = VitaFullSize(newWidth);
++				newHeight = VitaFullSize(newHeight);
+ 			}
+ 
+ 			// Apply new GL state, clear target if requested
+@@ -2064,15 +2172,16 @@ namespace Microsoft.Xna.Framework.Graphics
+ 
+ 		private void ApplySamplers()
+ 		{
+-			for (int sampler = 0; sampler < modifiedSamplers.Length; sampler += 1)
++			// Vita port: consume the dirty slots in their original ascending order. The mask
++			// becomes zero as soon as the highest changed slot has been handled.
++			int dirty = modifiedSamplers[0];
++			for (int sampler = 0; dirty != 0; sampler += 1, dirty >>= 1)
+ 			{
+-				if (!modifiedSamplers[sampler])
++				if ((dirty & 1) == 0)
+ 				{
+ 					continue;
+ 				}
+-
+-				modifiedSamplers[sampler] = false;
+-
++				modifiedSamplers[0] &= ~(1 << sampler);
+ 				FNA3D.FNA3D_VerifySampler(
+ 					GLDevice,
+ 					sampler,
+@@ -2083,20 +2192,17 @@ namespace Microsoft.Xna.Framework.Graphics
+ 				);
+ 			}
+ 
+-			for (int sampler = 0; sampler < modifiedVertexSamplers.Length; sampler += 1) 
++			dirty = modifiedVertexSamplers[0];
++			for (int sampler = 0; dirty != 0; sampler += 1, dirty >>= 1)
+ 			{
+-				if (!modifiedVertexSamplers[sampler])
++				if ((dirty & 1) == 0)
+ 				{
+ 					continue;
+ 				}
++				modifiedVertexSamplers[0] &= ~(1 << sampler);
+ 
+-				modifiedVertexSamplers[sampler] = false;
+-
+-				/* Believe it or not, this is actually how VertexTextures are
+-				 * stored in XNA4! Their D3D9 renderer just uses the last 4
+-				 * slots available in the device's sampler array. So that's what
+-				 * we get to do.
+-				 * -flibit
++				/* XNA4 stores vertex textures in the last four device sampler slots;
++				 * FNA3D_VerifyVertexSampler keeps that mapping unchanged.
+ 				 */
+ 				FNA3D.FNA3D_VerifyVertexSampler(
+ 					GLDevice,
+@@ -2109,6 +2215,28 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			}
+ 		}
+ 
++		/* Vita port: for SpriteBatch's flush on FNA3D's render thread. Applies the render states and samplers
++		 * with firstTexture in slot 0 as a draw would, and returns the vertex buffer binding and whether it
++		 * changed; texture slot 0 is then cleared, since the render thread binds each run's texture itself and
++		 * the next draw here must verify its texture again.
++		 */
++		internal unsafe void VitaPrepareSpriteBatch(Texture firstTexture, out FNA3D.FNA3D_VertexBufferBinding binding, out byte bindingsUpdated)
++		{
++			Textures[0] = firstTexture;
++			ApplyState();
++			VertexBuffer buffer = vertexBufferBindings[0].VertexBuffer;
++			binding = default(FNA3D.FNA3D_VertexBufferBinding);
++			binding.vertexBuffer = buffer.buffer;
++			binding.vertexDeclaration.vertexStride = buffer.VertexDeclaration.VertexStride;
++			binding.vertexDeclaration.elementCount = buffer.VertexDeclaration.elements.Length;
++			binding.vertexDeclaration.elements = buffer.VertexDeclaration.elementsPin;
++			binding.vertexOffset = vertexBufferBindings[0].VertexOffset;
++			binding.instanceFrequency = vertexBufferBindings[0].InstanceFrequency;
++			bindingsUpdated = (byte) (vertexBuffersUpdated ? 1 : 0);
++			vertexBuffersUpdated = false;
++			Textures[0] = null;
++		}
++
+ 		private unsafe void PrepareVertexBindingArray(int baseVertex)
+ 		{
+ 			fixed (FNA3D.FNA3D_VertexBufferBinding* b = &nativeBufferBindings[0])

@@ -1,0 +1,16 @@
+diff --git a/Netcode/AbstractNetEvent1.cs b/Netcode/AbstractNetEvent1.cs
+index 4975e6e0aad8f59e832831b4863b8ee1470e94ec..27d90d1c5e1caf214bd91d4ea2e7c84abbaab405 100644
+--- a/Netcode/AbstractNetEvent1.cs
++++ b/Netcode/AbstractNetEvent1.cs
+@@ -51,6 +51,11 @@ public abstract class AbstractNetEvent1<T> : AbstractNetSerializable
+ 
+ 	public void Poll()
+ 	{
++		// Port: nearly always empty, and every location polls several events every tick.
++		if (incomingEvents.Count == 0)
++		{
++			return;
++		}
+ 		List<EventRecording> triggeredEvents = null;
+ 		foreach (EventRecording e in incomingEvents)
+ 		{

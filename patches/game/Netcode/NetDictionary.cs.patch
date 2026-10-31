@@ -1,0 +1,286 @@
+diff --git a/Netcode/NetDictionary.cs b/Netcode/NetDictionary.cs
+index a7e9b7436d9e3e32194569933947dbc98263e013..e87ccb66e808b87e495450e40780b70f62b6d8e4 100644
+--- a/Netcode/NetDictionary.cs
++++ b/Netcode/NetDictionary.cs
+@@ -338,11 +338,15 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 
+ 	private Dictionary<TKey, TField> dict = new Dictionary<TKey, TField>();
+ 
+-	private Dictionary<TKey, NetVersion> dictReassigns = new Dictionary<TKey, NetVersion>();
++	// Keep empty modData/NetDictionary instances free of unused auxiliary stores.
++	// The main dictionary owns the comparer even before the first reassignment.
++	private Dictionary<TKey, NetVersion> dictReassigns;
+ 
+-	private List<OutgoingChange> outgoingChanges = new List<OutgoingChange>();
++	private Dictionary<TKey, NetVersion> Reassigns => dictReassigns ??= new Dictionary<TKey, NetVersion>(dict.Comparer);
+ 
+-	private List<IncomingChange> incomingChanges = new List<IncomingChange>();
++	private List<OutgoingChange> outgoingChanges;
++
++	private List<IncomingChange> incomingChanges;
+ 
+ 	public int Length => dict.Count;
+ 
+@@ -359,9 +363,9 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 			if (!dict.TryGetValue(key, out var field))
+ 			{
+ 				field = (dict[key] = new TField());
+-				dictReassigns[key] = GetLocalVersion();
++				Reassigns[key] = GetLocalVersion();
+ 				setFieldValue(field, key, value);
+-				added(key, field, dictReassigns[key]);
++				added(key, field, Reassigns[key]);
+ 			}
+ 			else
+ 			{
+@@ -404,6 +408,10 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 
+ 	protected override bool tickImpl()
+ 	{
++		if (incomingChanges == null)
++		{
++			return false;
++		}
+ 		List<IncomingChange> triggeredChanges = null;
+ 		foreach (IncomingChange ch in incomingChanges)
+ 		{
+@@ -476,7 +484,10 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 	public void SetEqualityComparer(IEqualityComparer<TKey> comparer)
+ 	{
+ 		dict = new Dictionary<TKey, TField>(dict, comparer);
+-		dictReassigns = new Dictionary<TKey, NetVersion>(dictReassigns, comparer);
++		if (dictReassigns != null)
++		{
++			dictReassigns = new Dictionary<TKey, NetVersion>(dictReassigns, comparer);
++		}
+ 	}
+ 
+ 	private void setFieldParent(TField arg)
+@@ -489,22 +500,25 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 
+ 	private void added(TKey key, TField field, NetVersion reassign)
+ 	{
+-		outgoingChanges.Add(new OutgoingChange(removal: false, key, field, reassign));
++		(outgoingChanges ??= new List<OutgoingChange>()).Add(new OutgoingChange(removal: false, key, field, reassign));
+ 		setFieldParent(field);
+ 		MarkDirty();
+ 		addedEvent(key, field);
+-		foreach (IncomingChange change in incomingChanges)
++		if (incomingChanges != null)
+ 		{
+-			if (!change.Removal && object.Equals(change.Key, key))
++			foreach (IncomingChange change in incomingChanges)
+ 			{
+-				clearFieldParent(change.Field);
+-				if (OnConflictResolve != null)
++				if (!change.Removal && object.Equals(change.Key, key))
+ 				{
+-					OnConflictResolve(key, change.Field, field);
++					clearFieldParent(change.Field);
++					if (OnConflictResolve != null)
++					{
++						OnConflictResolve(key, change.Field, field);
++					}
+ 				}
+ 			}
+ 		}
+-		incomingChanges.RemoveAll((IncomingChange incomingChange) => object.Equals(key, incomingChange.Key));
++		incomingChanges?.RemoveAll((IncomingChange incomingChange) => object.Equals(key, incomingChange.Key));
+ 	}
+ 
+ 	private void addedEvent(TKey key, TField field)
+@@ -533,7 +547,7 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 
+ 	private void removed(TKey key, TField field, NetVersion reassign)
+ 	{
+-		outgoingChanges.Add(new OutgoingChange(removal: true, key, field, reassign));
++		(outgoingChanges ??= new List<OutgoingChange>()).Add(new OutgoingChange(removal: true, key, field, reassign));
+ 		clearFieldParent(field);
+ 		MarkDirty();
+ 		removedEvent(key, field);
+@@ -556,8 +570,8 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 	public void Add(TKey key, TField field)
+ 	{
+ 		dict.Add(key, field);
+-		dictReassigns.Add(key, GetLocalVersion());
+-		added(key, field, dictReassigns[key]);
++		Reassigns.Add(key, GetLocalVersion());
++		added(key, field, Reassigns[key]);
+ 	}
+ 
+ 	public bool TryAdd(TKey key, TValue value)
+@@ -578,7 +592,7 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 		{
+ 			Remove(keys.First());
+ 		}
+-		outgoingChanges.RemoveAll((OutgoingChange ch) => !ch.Removal);
++		outgoingChanges?.RemoveAll((OutgoingChange ch) => !ch.Removal);
+ 	}
+ 
+ 	public bool ContainsKey(TKey key)
+@@ -595,7 +609,7 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 	{
+ 		if (dict.TryGetValue(key, out var field))
+ 		{
+-			NetVersion reassign = dictReassigns[key];
++			NetVersion reassign = Reassigns[key];
+ 			dict.Remove(key);
+ 			dictReassigns.Remove(key);
+ 			removed(key, field, reassign);
+@@ -659,7 +673,7 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 	protected override void CleanImpl()
+ 	{
+ 		base.CleanImpl();
+-		outgoingChanges.Clear();
++		outgoingChanges?.Clear();
+ 	}
+ 
+ 	protected abstract TKey ReadKey(BinaryReader reader);
+@@ -677,6 +691,11 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 
+ 	private void writeMultiple<T>(WriteFunc<T> writeFunc, BinaryWriter writer, IEnumerable<T> values)
+ 	{
++		if (values == null)
++		{
++			writer.Write7BitEncoded(0u);
++			return;
++		}
+ 		writer.Write7BitEncoded((uint)values.Count());
+ 		foreach (T value in values)
+ 		{
+@@ -727,20 +746,23 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 
+ 	private KeyValuePair<NetVersion, TField>? findConflict(TKey key)
+ 	{
+-		foreach (IncomingChange change in incomingChanges.AsEnumerable().Reverse())
++		if (incomingChanges != null)
+ 		{
+-			if (object.Equals(change.Key, key))
++			foreach (IncomingChange change in incomingChanges.AsEnumerable().Reverse())
+ 			{
+-				if (change.Removal)
++				if (object.Equals(change.Key, key))
+ 				{
+-					return null;
++					if (change.Removal)
++					{
++						return null;
++					}
++					return new KeyValuePair<NetVersion, TField>(change.Reassigned, change.Field);
+ 				}
+-				return new KeyValuePair<NetVersion, TField>(change.Reassigned, change.Field);
+ 			}
+ 		}
+ 		if (dict.TryGetValue(key, out var value))
+ 		{
+-			return new KeyValuePair<NetVersion, TField>(dictReassigns[key], value);
++			return new KeyValuePair<NetVersion, TField>(Reassigns[key], value);
+ 		}
+ 		return null;
+ 	}
+@@ -756,14 +778,14 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 			}
+ 		}
+ 		uint timestamp = GetLocalTick() + (uint)((InterpolationWait && Root != null) ? Root.Clock.InterpolationTicks : 0);
+-		incomingChanges.Add(new IncomingChange(timestamp, removal, key, field, fieldReassign));
++		(incomingChanges ??= new List<IncomingChange>()).Add(new IncomingChange(timestamp, removal, key, field, fieldReassign));
+ 		NeedsTick = true;
+ 	}
+ 
+ 	private void performIncomingAdd(IncomingChange add)
+ 	{
+ 		dict[add.Key] = add.Field;
+-		dictReassigns[add.Key] = add.Reassigned;
++		Reassigns[add.Key] = add.Reassigned;
+ 		addedEvent(add.Key, add.Field);
+ 	}
+ 
+@@ -805,7 +827,7 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 		reassign.Read(reader);
+ 		reader.ReadSkippable(() =>
+ 		{
+-			int num = incomingChanges.FindLastIndex((IncomingChange ch) => !ch.Removal && object.Equals(ch.Key, key) && reassign.Equals(ch.Reassigned));
++			int num = incomingChanges?.FindLastIndex((IncomingChange ch) => !ch.Removal && object.Equals(ch.Key, key) && reassign.Equals(ch.Reassigned)) ?? -1;
+ 			TField value;
+ 			if (num != -1)
+ 			{
+@@ -821,7 +843,7 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 					field.NetFields.Read(reader, version);
+ 				}
+ 			}
+-			else if (dict.TryGetValue(key, out value) && dictReassigns[key].Equals(reassign))
++			else if (dict.TryGetValue(key, out value) && Reassigns[key].Equals(reassign))
+ 			{
+ 				if (OnValueTargetUpdated != null)
+ 				{
+@@ -846,9 +868,9 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 	public override void ReadFull(BinaryReader reader, NetVersion version)
+ 	{
+ 		dict.Clear();
+-		dictReassigns.Clear();
+-		outgoingChanges.Clear();
+-		incomingChanges.Clear();
++		dictReassigns?.Clear();
++		outgoingChanges?.Clear();
++		incomingChanges?.Clear();
+ 		int count = reader.ReadInt32();
+ 		for (int i = 0; i < count; i++)
+ 		{
+@@ -857,7 +879,7 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 			reassign.Read(reader);
+ 			TField field = ReadFieldFull(reader, version);
+ 			dict.Add(key, field);
+-			dictReassigns.Add(key, reassign);
++			Reassigns.Add(key, reassign);
+ 			setFieldParent(field);
+ 			addedEvent(key, field);
+ 		}
+@@ -906,14 +928,17 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 		{
+ 			if (pair.Value.NetFields.Dirty)
+ 			{
+-				yield return new OutgoingChange(removal: false, pair.Key, pair.Value, dictReassigns[pair.Key]);
++				yield return new OutgoingChange(removal: false, pair.Key, pair.Value, Reassigns[pair.Key]);
+ 			}
+ 		}
+-		foreach (OutgoingChange removal in outgoingChanges.Where((OutgoingChange ch) => ch.Removal))
++		if (outgoingChanges != null)
+ 		{
+-			if (removal.Field.NetFields.Dirty)
++			foreach (OutgoingChange removal in outgoingChanges.Where((OutgoingChange ch) => ch.Removal))
+ 			{
+-				yield return removal;
++				if (removal.Field.NetFields.Dirty)
++				{
++					yield return removal;
++				}
+ 			}
+ 		}
+ 	}
+@@ -930,7 +955,7 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 		foreach (TKey key in dict.Keys)
+ 		{
+ 			WriteKey(writer, key);
+-			dictReassigns[key].Write(writer);
++			Reassigns[key].Write(writer);
+ 			WriteFieldFull(writer, dict[key]);
+ 		}
+ 	}
+@@ -952,11 +977,14 @@ public abstract class NetDictionary<TKey, TValue, TField, TSerialDict, TSelf> :
+ 
+ 	protected override void ForEachChild(Action<INetSerializable> childAction)
+ 	{
+-		foreach (IncomingChange ch in incomingChanges)
++		if (incomingChanges != null)
+ 		{
+-			if (ch.Field != null)
++			foreach (IncomingChange ch in incomingChanges)
+ 			{
+-				childAction(ch.Field.NetFields);
++				if (ch.Field != null)
++				{
++					childAction(ch.Field.NetFields);
++				}
+ 			}
+ 		}
+ 		foreach (TField field in dict.Values)

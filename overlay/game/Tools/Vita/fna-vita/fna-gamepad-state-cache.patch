@@ -1,0 +1,46 @@
+diff --git a/src/FNAPlatform/SDL3_FNAPlatform.cs b/src/FNAPlatform/SDL3_FNAPlatform.cs
+index d816dcf..67c818d 100644
+--- a/src/FNAPlatform/SDL3_FNAPlatform.cs
++++ b/src/FNAPlatform/SDL3_FNAPlatform.cs
+@@ -895,6 +895,9 @@ namespace Microsoft.Xna.Framework
+ 			bool[] textInputControlDown,
+ 			ref bool textInputSuppress
+ 		) {
++			// Gamepad state only changes when SDL pumps events: GetGamePadState serves repeat queries
++			// until the next poll from its cache.
++			INTERNAL_pollGeneration += 1;
+ 			uint windowID = SDL.SDL_GetWindowID(game.Window.Handle);
+ 			SDL.SDL_Event evt;
+ 			char* charsBuffer = stackalloc char[32]; // SDL_TEXTINPUTEVENT_TEXT_SIZE
+@@ -1795,7 +1798,31 @@ namespace Microsoft.Xna.Framework
+ 			return INTERNAL_capabilities[index];
+ 		}
+ 
++		/* Event polls so far; GetGamePadState results are reused within one. A
++		 * query reads ~25 values through separate P/Invokes, and games ask for
++		 * the same pad several times a frame (Stardew Valley: 13% of the PS
++		 * Vita's main thread).
++		 */
++		private static int INTERNAL_pollGeneration = 1;
++		private static int[] INTERNAL_cachedStateGeneration = new int[GamePad.GAMEPAD_COUNT];
++		private static GamePadDeadZone[] INTERNAL_cachedStateDeadZone = new GamePadDeadZone[GamePad.GAMEPAD_COUNT];
++		private static GamePadState[] INTERNAL_cachedState = new GamePadState[GamePad.GAMEPAD_COUNT];
++
+ 		public static GamePadState GetGamePadState(int index, GamePadDeadZone deadZoneMode)
++		{
++			if (	INTERNAL_cachedStateGeneration[index] == INTERNAL_pollGeneration &&
++				INTERNAL_cachedStateDeadZone[index] == deadZoneMode	)
++			{
++				return INTERNAL_cachedState[index];
++			}
++			GamePadState state = INTERNAL_GetGamePadState(index, deadZoneMode);
++			INTERNAL_cachedState[index] = state;
++			INTERNAL_cachedStateDeadZone[index] = deadZoneMode;
++			INTERNAL_cachedStateGeneration[index] = INTERNAL_pollGeneration;
++			return state;
++		}
++
++		private static GamePadState INTERNAL_GetGamePadState(int index, GamePadDeadZone deadZoneMode)
+ 		{
+ 			IntPtr device = INTERNAL_devices[index];
+ 			if (device == IntPtr.Zero)

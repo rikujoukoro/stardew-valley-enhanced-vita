@@ -1,0 +1,41 @@
+diff --git a/StardewValley.Network/LidgrenMessageUtils.cs b/StardewValley.Network/LidgrenMessageUtils.cs
+index 1c8168aa60cd0f2f069bf4c70ab12266f88f2eae..a2a6e8660fac9cad4cf3a9369fd6e97d1a1fce14 100644
+--- a/StardewValley.Network/LidgrenMessageUtils.cs
++++ b/StardewValley.Network/LidgrenMessageUtils.cs
+@@ -7,26 +7,26 @@ public static class LidgrenMessageUtils
+ {
+ 	internal static void WriteMessage(OutgoingMessage srcMsg, NetOutgoingMessage destMsg)
+ 	{
+-		byte[] dataRaw;
+-		using (MemoryStream stream = new MemoryStream())
++		byte[] data;
++		using (MemoryStream memoryStream = new MemoryStream())
+ 		{
+-			using BinaryWriter writer = new BinaryWriter(stream);
++			using BinaryWriter writer = new BinaryWriter(memoryStream);
+ 			srcMsg.Write(writer);
+-			dataRaw = stream.ToArray();
++			data = memoryStream.ToArray();
+ 		}
+-		using MemoryStream srcStream = new MemoryStream(Program.netCompression.CompressAbove(dataRaw, 1024));
+-		using NetBufferWriteStream destStream = new NetBufferWriteStream(destMsg);
+-		srcStream.CopyTo(destStream);
++		using MemoryStream memoryStream2 = new MemoryStream(Program.netCompression.CompressAbove(data, 1024));
++		using NetBufferWriteStream destination = new NetBufferWriteStream(destMsg);
++		memoryStream2.CopyTo(destination);
+ 	}
+ 
+ 	internal static void ReadStreamToMessage(NetBufferReadStream stream, IncomingMessage msg)
+ 	{
+-		Stream messageStream = stream;
++		Stream input = stream;
+ 		if (Program.netCompression.TryDecompressStream(stream, out var decompressed))
+ 		{
+-			messageStream = new MemoryStream(decompressed);
++			input = new MemoryStream(decompressed);
+ 		}
+-		using BinaryReader reader = new BinaryReader(messageStream);
++		using BinaryReader reader = new BinaryReader(input);
+ 		msg.Read(reader);
+ 	}
+ }

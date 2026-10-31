@@ -1,0 +1,327 @@
+diff --git a/StardewValley/SaveGame.cs b/StardewValley/SaveGame.cs
+index f40c2f6173ca59ca3c4272bb36404ea190b8338b..bf3cea07970cbe6db761b42593fc6c9275eb2c4e 100644
+--- a/StardewValley/SaveGame.cs
++++ b/StardewValley/SaveGame.cs
+@@ -36,6 +36,92 @@ namespace StardewValley;
+ 
+ public class SaveGame
+ {
++	/// <summary>Port: a write-only stream for the save file that collects writes into fixed-size pieces and passes each full piece to the file; Flush does nothing (<see cref="WriteOut" /> writes the rest). See getSaveEnumerator.</summary>
++	private sealed class ChunkedSaveStream : Stream
++	{
++		private readonly Stream _file;
++
++		private readonly byte[] _chunk;
++
++		private int _used;
++
++		private long _length;
++
++		public ChunkedSaveStream(Stream file, int chunkSize)
++		{
++			_file = file;
++			_chunk = new byte[chunkSize];
++		}
++
++		public override bool CanRead => false;
++
++		public override bool CanSeek => false;
++
++		public override bool CanWrite => true;
++
++		public override long Length => _length;
++
++		public override long Position
++		{
++			get
++			{
++				return _length;
++			}
++			set
++			{
++				throw new NotSupportedException();
++			}
++		}
++
++		public override void Write(byte[] buffer, int offset, int count)
++		{
++			_length += count;
++			while (count > 0)
++			{
++				int take = Math.Min(count, _chunk.Length - _used);
++				Buffer.BlockCopy(buffer, offset, _chunk, _used, take);
++				_used += take;
++				offset += take;
++				count -= take;
++				if (_used == _chunk.Length)
++				{
++					_file.Write(_chunk, 0, _used);
++					_used = 0;
++				}
++			}
++		}
++
++		public override void Flush()
++		{
++		}
++
++		/// <summary>Writes what is left to the file.</summary>
++		public void WriteOut()
++		{
++			if (_used > 0)
++			{
++				_file.Write(_chunk, 0, _used);
++				_used = 0;
++			}
++			_file.Flush();
++		}
++
++		public override int Read(byte[] buffer, int offset, int count)
++		{
++			throw new NotSupportedException();
++		}
++
++		public override long Seek(long offset, SeekOrigin origin)
++		{
++			throw new NotSupportedException();
++		}
++
++		public override void SetLength(long value)
++		{
++			throw new NotSupportedException();
++		}
++	}
++
+ 	public const string TempNameSuffix = "_STARDEWVALLEYSAVETMP";
+ 
+ 	public const string BackupNameSuffix = "_old";
+@@ -232,7 +318,21 @@ public class SaveGame
+ 
+ 	public string gameVersionLabel;
+ 
+-	public static XmlSerializer serializer = new XmlSerializer(typeof(SaveGame), new Type[5]
++	// Port: created on first use, pregenerated where available (SaveSerializer.Create). Built at run time
++	// each one reflects over most of the game's types and emits IL; as static field initializers they
++	// ran during startup (Mono initializes the class while compiling the first method that reads them),
++	// which took ~150 s on the Vita before the title screen.
++	private static XmlSerializer _serializer;
++
++	private static XmlSerializer _farmerSerializer;
++
++	private static XmlSerializer _locationSerializer;
++
++	private static XmlSerializer _descriptionElementSerializer;
++
++	private static XmlSerializer _legacyDescriptionElementSerializer;
++
++	public static XmlSerializer serializer => _serializer ??= SaveSerializer.Create(typeof(SaveGame), new Type[5]
+ 	{
+ 		typeof(Character),
+ 		typeof(GameLocation),
+@@ -241,22 +341,22 @@ public class SaveGame
+ 		typeof(TerrainFeature)
+ 	});
+ 
+-	public static XmlSerializer farmerSerializer = new XmlSerializer(typeof(Farmer), new Type[1] { typeof(Item) });
++	public static XmlSerializer farmerSerializer => _farmerSerializer ??= SaveSerializer.Create(typeof(Farmer), new Type[1] { typeof(Item) });
+ 
+-	public static XmlSerializer locationSerializer = new XmlSerializer(typeof(GameLocation), new Type[3]
++	public static XmlSerializer locationSerializer => _locationSerializer ??= SaveSerializer.Create(typeof(GameLocation), new Type[3]
+ 	{
+ 		typeof(Character),
+ 		typeof(Item),
+ 		typeof(TerrainFeature)
+ 	});
+ 
+-	public static XmlSerializer descriptionElementSerializer = new XmlSerializer(typeof(DescriptionElement), new Type[2]
++	public static XmlSerializer descriptionElementSerializer => _descriptionElementSerializer ??= SaveSerializer.Create(typeof(DescriptionElement), new Type[2]
+ 	{
+ 		typeof(Character),
+ 		typeof(Item)
+ 	});
+ 
+-	public static XmlSerializer legacyDescriptionElementSerializer = new XmlSerializer(typeof(SaveMigrator_1_6.LegacyDescriptionElement), new Type[3]
++	public static XmlSerializer legacyDescriptionElementSerializer => _legacyDescriptionElementSerializer ??= SaveSerializer.Create(typeof(SaveMigrator_1_6.LegacyDescriptionElement), new Type[3]
+ 	{
+ 		typeof(DescriptionElement),
+ 		typeof(Character),
+@@ -457,32 +557,38 @@ public class SaveGame
+ 			Game1.debugOutput = Game1.parseText(ex.Message);
+ 			yield break;
+ 		}
+-		MemoryStream mstream1 = new MemoryStream(1024);
+-		new MemoryStream(1024);
+ 		if (CancelToTitle)
+ 		{
++			fstream.Close();
+ 			throw new TaskCanceledException();
+ 		}
+ 		yield return 2;
+ 		LogVerbose("Saving without compression...");
+ 		XmlWriterSettings settings = new XmlWriterSettings
+ 		{
+-			CloseOutput = false
++			CloseOutput = false,
++			CheckCharacters = false,
++			NewLineHandling = NewLineHandling.None
+ 		};
+-		XmlWriter xmlWriter = XmlWriter.Create(mstream1, settings);
++		// Port: written straight to the temp file (same bytes) instead of a MemoryStream copied out with ToArray. A 4.6 MB
++		// save grew the stream to an 8 MB array next to the 4.6 MB copy; on the Vita, after a few in-game days the heap no
++		// longer had 8 MB in one piece and the save failed with OutOfMemoryException. The temp file still only replaces the
++		// save once it is complete. The nested serializers (SerializableDictionary) flush the writer after every entry,
++		// so the stream ignores Flush and writes in 256 KB pieces: flushed to the card each time, the save took 4 minutes.
++		ChunkedSaveStream bufferedData = new ChunkedSaveStream(fstream, 262144);
++		XmlWriter xmlWriter = XmlWriter.Create(bufferedData, settings);
+ 		xmlWriter.WriteStartDocument();
+ 		SaveSerializer.Serialize(xmlWriter, saveData);
+ 		xmlWriter.WriteEndDocument();
+ 		xmlWriter.Flush();
+ 		xmlWriter.Close();
+-		mstream1.Close();
+-		byte[] buffer1 = mstream1.ToArray();
++		bufferedData.WriteOut();
+ 		if (CancelToTitle)
+ 		{
++			fstream.Close();
+ 			throw new TaskCanceledException();
+ 		}
+ 		yield return 2;
+-		fstream.Write(buffer1, 0, buffer1.Length);
+ 		fstream.Close();
+ 		Game1.player.saveTime = (int)(DateTime.UtcNow - new DateTime(2012, 6, 22)).TotalMinutes;
+ 		try
+@@ -496,14 +602,15 @@ public class SaveGame
+ 			Game1.debugOutput = Game1.parseText(ex2.Message);
+ 			yield break;
+ 		}
+-		Stream stream2 = fstream;
++		// Port: the same flush-ignoring stream as the main file (each nested serializer's flush went to the card).
++		ChunkedSaveStream stream2 = new ChunkedSaveStream(fstream, 262144);
+ 		XmlWriter xmlWriter2 = XmlWriter.Create(stream2, settings);
+ 		xmlWriter2.WriteStartDocument();
+ 		SaveSerializer.Serialize(xmlWriter2, Game1.player);
+ 		xmlWriter2.WriteEndDocument();
+ 		xmlWriter2.Flush();
+ 		xmlWriter2.Close();
+-		stream2.Close();
++		stream2.WriteOut();
+ 		fstream.Close();
+ 		if (CancelToTitle)
+ 		{
+@@ -527,6 +634,12 @@ public class SaveGame
+ 			allFarmer2.resetAllTrinketEffects();
+ 		}
+ 		Game1.player.sleptInTemporaryBed.Value = false;
++		if (VitaPlatform.IsVita)
++		{
++			// Port: the save's garbage (serializer buffers, strings) collected while the save screen is still up, not
++			// in the middle of the next day; each save left the Vita's heap ~20 MB bigger until a later one ran out.
++			GC.Collect();
++		}
+ 		if (CancelToTitle)
+ 		{
+ 			throw new TaskCanceledException();
+@@ -600,7 +713,7 @@ public class SaveGame
+ 		Stream stream = null;
+ 		try
+ 		{
+-			stream = new MemoryStream(File.ReadAllBytes(fullFilePath), writable: false);
++			stream = new FileStream(fullFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 262144);
+ 		}
+ 		catch (IOException ex)
+ 		{
+@@ -609,7 +722,7 @@ public class SaveGame
+ 			return null;
+ 		}
+ 		byte firstByte = (byte)stream.ReadByte();
+-		stream.Position--;
++		stream.Seek(0, SeekOrigin.Begin);
+ 		if (firstByte == 120)
+ 		{
+ 			LogVerbose("zlib stream detected...");
+@@ -667,6 +780,11 @@ public class SaveGame
+ 	public static IEnumerator<int> getLoadEnumerator(string file)
+ 	{
+ 		LogVerbose("getLoadEnumerator('" + file + "')");
++		VitaAudioWarmup.World();
++		if (VitaPlatform.IsVita)
++		{
++			GC.Collect();
++		}
+ 		Stopwatch stopwatch = Stopwatch.StartNew();
+ 		Game1.SetSaveName(Path.GetFileNameWithoutExtension(file).Split('_').FirstOrDefault());
+ 		Game1.loadingMessage = Game1.content.LoadString("Strings\\StringsFromCSFiles:SaveGame.cs.4690");
+@@ -694,6 +812,10 @@ public class SaveGame
+ 			Game1.debugOutput = Game1.parseText(error);
+ 			yield break;
+ 		}
++		if (VitaPlatform.IsVita)
++		{
++			GC.Collect();
++		}
+ 		if (autoRecovered)
+ 		{
+ 			LogWarn("Save file " + file + " was corrupted; auto-recovered it from the backup.");
+@@ -1082,6 +1204,12 @@ public class SaveGame
+ 		yield return 85;
+ 		yield return 87;
+ 		yield return 88;
++		// Port: compile the code play needs in its first minutes now, behind the loading screen,
++		// instead of in 100-700 ms stalls on the first walk, swing or menu (VitaPlatform.PrepareHotMethods).
++		foreach (int step in VitaPlatform.PrepareHotMethods())
++		{
++			yield return 88 + step * 6 / 100;
++		}
+ 		yield return 95;
+ 		Game1.fadeToBlack = true;
+ 		Game1.fadeIn = false;
+@@ -1116,6 +1244,9 @@ public class SaveGame
+ 			Game1.player.team.junimoKartScores.LoadScores(loaded.junimoKartLeaderboards.GetScores());
+ 		}
+ 		Game1.options = loaded.options;
++		// Port: volume is global (default_options), not per save; see Options.ApplyGlobalAudioLevels.
++		// Must run before SaveDefaultOptions below writes this save's options to default_options.
++		Game1.options?.ApplyGlobalAudioLevels();
+ 		Game1.splitscreenOptions = new SerializableDictionary<long, Options>(loaded.splitscreenOptions.ToDictionary());
+ 		Game1.CustomData = loaded.CustomData;
+ 		Game1.player.team.broadcastedMail.Clear();
+@@ -1282,6 +1413,14 @@ public class SaveGame
+ 		{
+ 			Game1.netWorldState.Value.UpdateFromGame1();
+ 		}
++		if (VitaPlatform.IsVita)
++		{
++			// Port: the data and dialogue reads of the first frame of play, done under the loading screen.
++			Game1.VitaPreloadForDay();
++			// Port: the load leaves tens of MB of garbage, and Mono's next full collection (~1 s with a
++			// 130 MB heap) came a few seconds into play as a frozen frame. Done here, under the loading screen.
++			GC.Collect();
++		}
+ 		LogVerbose(string.Concat("getLoadEnumerator() exited, elapsed = '", stopwatch.Elapsed, "'"));
+ 		if (CancelToTitle)
+ 		{
+@@ -1763,6 +1902,22 @@ public class SaveGame
+ 
+ 	private static void LogError(string message, Exception exception = null)
+ 	{
+-		Game1.log.Error(message, exception);
++		if (exception is OutOfMemoryException)
++		{
++			try
++			{
++				GC.Collect();
++			}
++			catch
++			{
++			}
++		}
++		try
++		{
++			Game1.log.Error(message, exception);
++		}
++		catch
++		{
++		}
+ 	}
+ }

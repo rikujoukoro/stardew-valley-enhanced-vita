@@ -1,0 +1,108 @@
+diff --git a/StardewValley.TerrainFeatures/Tree.cs b/StardewValley.TerrainFeatures/Tree.cs
+index 80c57b4ae2bf433e4bfa59351a26df3ebe3775dc..425235b85dd8f0096ecf6843cce56463cecc9c9b 100644
+--- a/StardewValley.TerrainFeatures/Tree.cs
++++ b/StardewValley.TerrainFeatures/Tree.cs
+@@ -417,7 +417,7 @@ public class Tree : TerrainFeature
+ 		}
+ 		if (shakeTimer > 0f)
+ 		{
+-			shakeTimer -= time.ElapsedGameTime.Milliseconds;
++			shakeTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 		}
+ 		if (destroy.Value)
+ 		{
+@@ -477,7 +477,8 @@ public class Tree : TerrainFeature
+ 					location.localSound("treethud");
+ 					if (IsLeafy())
+ 					{
+-						int leavesToAdd = Game1.random.Next(90, 120);
++						// Port: reduce falling leaves on Vita from 90-120 down to 6 (with MinimalDebris) or 18-24 to eliminate frame drop during chop
++						int leavesToAdd = VitaPlatform.IsVita ? (VitaPlatform.MinimalDebris ? 6 : Game1.random.Next(18, 25)) : Game1.random.Next(90, 120);
+ 						for (int i = 0; i < leavesToAdd; i++)
+ 						{
+ 							leaves.Add(new Leaf(new Vector2(Game1.random.Next((int)(tileLocation.X * 64f), (int)(tileLocation.X * 64f + 192f)) + (shakeLeft.Value ? (-320) : 256), tileLocation.Y * 64f - 64f), (float)Game1.random.Next(-10, 10) / 100f, Game1.random.Next(4), (float)Game1.random.Next(10, 40) / 10f));
+@@ -502,11 +503,26 @@ public class Tree : TerrainFeature
+ 							numToDrop *= 2;
+ 						}
+ 						Game1.createRadialDebris(location, 12, (int)tileLocation.X + (shakeLeft.Value ? (-4) : 4), (int)tileLocation.Y, numToDrop, resource: true);
+-						Game1.createRadialDebris(location, 12, (int)tileLocation.X + (shakeLeft.Value ? (-4) : 4), (int)tileLocation.Y, (int)((lastHitBy.professions.Contains(12) ? 1.25 : 1.0) * (double)(12 + extraWoodCalculator(tileLocation))), resource: false);
++						// Port: keep full real wood drop, but skip or cap cosmetic-only non-resource wood debris chips on Vita
++						if (!VitaPlatform.MinimalDebris)
++						{
++							int cosmeticDebris = VitaPlatform.IsVita ? Math.Min(3, (int)((lastHitBy.professions.Contains(12) ? 1.25 : 1.0) * (double)(12 + extraWoodCalculator(tileLocation)))) : (int)((lastHitBy.professions.Contains(12) ? 1.25 : 1.0) * (double)(12 + extraWoodCalculator(tileLocation)));
++							Game1.createRadialDebris(location, 12, (int)tileLocation.X + (shakeLeft.Value ? (-4) : 4), (int)tileLocation.Y, cosmeticDebris, resource: false);
++						}
+ 					}
+ 					if (data.DropWoodOnChop)
+ 					{
+-						Game1.createMultipleObjectDebris("(O)92", (int)tileLocation.X + (shakeLeft.Value ? (-4) : 4), (int)tileLocation.Y, 5, lastPlayerToHit.Value, location);
++						if (VitaPlatform.IsVita)
++						{
++							int sapTileX = (int)tileLocation.X + (shakeLeft.Value ? (-4) : 4);
++							int sapTileY = (int)tileLocation.Y;
++							Farmer sapFarmer = Game1.GetPlayer(lastPlayerToHit.Value) ?? Game1.player;
++							location.debris.Add(new Debris("(O)92", 5, new Vector2(sapTileX * 64 + 32, sapTileY * 64 + 32), sapFarmer.getStandingPosition()));
++						}
++						else
++						{
++							Game1.createMultipleObjectDebris("(O)92", (int)tileLocation.X + (shakeLeft.Value ? (-4) : 4), (int)tileLocation.Y, 5, lastPlayerToHit.Value, location);
++						}
+ 					}
+ 					int numHardwood = 0;
+ 					if (data.DropHardwoodOnLumberChop)
+@@ -543,7 +559,17 @@ public class Tree : TerrainFeature
+ 					}
+ 					if (numHardwood > 0)
+ 					{
+-						Game1.createMultipleObjectDebris("(O)709", (int)tileLocation.X + (shakeLeft.Value ? (-4) : 4), (int)tileLocation.Y, numHardwood, lastPlayerToHit.Value, location);
++						if (VitaPlatform.IsVita && numHardwood > 1)
++						{
++							int hwTileX = (int)tileLocation.X + (shakeLeft.Value ? (-4) : 4);
++							int hwTileY = (int)tileLocation.Y;
++							Farmer hwFarmer = Game1.GetPlayer(lastPlayerToHit.Value) ?? Game1.player;
++							location.debris.Add(new Debris("(O)709", numHardwood, new Vector2(hwTileX * 64 + 32, hwTileY * 64 + 32), hwFarmer.getStandingPosition()));
++						}
++						else
++						{
++							Game1.createMultipleObjectDebris("(O)709", (int)tileLocation.X + (shakeLeft.Value ? (-4) : 4), (int)tileLocation.Y, numHardwood, lastPlayerToHit.Value, location);
++						}
+ 					}
+ 					float seedOnChopChance = data.SeedOnChopChance;
+ 					if (lastHitBy.getEffectiveSkillLevel(2) >= 1 && data != null && data.SeedItemId != null && r.NextDouble() < (double)seedOnChopChance)
+@@ -606,7 +632,7 @@ public class Tree : TerrainFeature
+ 		if (((maxShake == 0f) | doEvenIfStillShaking) && growthStage.Value >= 3 && !stump.Value)
+ 		{
+ 			shakeLeft.Value = (float)Game1.player.StandingPixel.X > (tileLocation.X + 0.5f) * 64f || (Game1.player.Tile.X == tileLocation.X && Game1.random.NextBool());
+-			maxShake = (float)((growthStage.Value >= 5) ? (Math.PI / 128.0) : (Math.PI / 64.0));
++			maxShake = (VitaPlatform.ShakeEnabled ? ((float)((growthStage.Value >= 5) ? (Math.PI / 128.0) : (Math.PI / 64.0))) : 0f);
+ 			if (growthStage.Value >= 5)
+ 			{
+ 				if (IsLeafy())
+@@ -1047,7 +1073,8 @@ public class Tree : TerrainFeature
+ 				shake(tileLocation, doEvenIfStillShaking: true);
+ 				growthStage.Value = 12 - moss.Stack;
+ 				Game1.playSound("moss_cut");
+-				for (int i = 0; i < 6; i++)
++				int mossSprites = (VitaPlatform.MinimalDebris || VitaPlatform.FewParticles) ? 2 : 6;
++				for (int i = 0; i < mossSprites; i++)
+ 				{
+ 					location.temporarySprites.Add(new TemporaryAnimatedSprite("TileSheets\\debris", new Microsoft.Xna.Framework.Rectangle(Game1.random.Choose(16, 0), 96, 16, 16), new Vector2(tileLocation.X + (float)Game1.random.NextDouble() - 0.15f, tileLocation.Y - 1f + (float)Game1.random.NextDouble()) * 64f, flipped: false, 0.025f, Color.Green)
+ 					{
+@@ -1390,7 +1417,7 @@ public class Tree : TerrainFeature
+ 			return;
+ 		}
+ 		Farmer lastHitBy = Game1.GetPlayer(lastPlayerToHit.Value) ?? Game1.MasterPlayer;
+-		Game1.createRadialDebris(location, 12, (int)tileLocation.X, (int)tileLocation.Y, Game1.random.Next(20, 30), resource: false, -1, item: false, GetChopDebrisColor(data));
++		Game1.createRadialDebris(location, 12, (int)tileLocation.X, (int)tileLocation.Y, VitaPlatform.IsVita ? 4 : Game1.random.Next(20, 30), resource: false, -1, item: false, GetChopDebrisColor(data));
+ 		if (data.DropWoodOnChop || data.DropHardwoodOnLumberChop)
+ 		{
+ 			Game1.createDebris(12, (int)tileLocation.X, (int)tileLocation.Y, (int)((lastHitBy.professions.Contains(12) ? 1.25 : 1.0) * 4.0), location);
+@@ -1458,7 +1485,7 @@ public class Tree : TerrainFeature
+ 			health.Value = -100f;
+ 			if (data != null)
+ 			{
+-				Game1.createRadialDebris(location, 12, (int)tileLocation.X, (int)tileLocation.Y, Game1.random.Next(30, 40), resource: false, -1, item: false, GetChopDebrisColor(data));
++				Game1.createRadialDebris(location, 12, (int)tileLocation.X, (int)tileLocation.Y, VitaPlatform.IsVita ? 4 : Game1.random.Next(30, 40), resource: false, -1, item: false, GetChopDebrisColor(data));
+ 				Random r;
+ 				if (Game1.IsMultiplayer)
+ 				{

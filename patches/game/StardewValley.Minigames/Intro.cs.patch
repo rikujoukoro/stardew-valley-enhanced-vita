@@ -1,0 +1,110 @@
+diff --git a/StardewValley.Minigames/Intro.cs b/StardewValley.Minigames/Intro.cs
+index 20115cdaa1bfab568aa0c0a234fc3f1b68e6bf81..dbaac1eda6656a865fea931928b59a3331230ac3 100644
+--- a/StardewValley.Minigames/Intro.cs
++++ b/StardewValley.Minigames/Intro.cs
+@@ -147,6 +147,10 @@ public class Intro : IMinigame
+ 
+ 	public Intro()
+ 	{
++		if (Game1.graphics.GraphicsDevice.Viewport.Height <= 600)
++		{
++			pixelScale = 2;
++		}
+ 		texture = Game1.content.Load<Texture2D>("Minigames\\Intro");
+ 		roadsideTexture = Game1.content.Load<Texture2D>("Maps\\spring_outdoorsTileSheet");
+ 		cloudTexture = Game1.content.Load<Texture2D>("Minigames\\Clouds");
+@@ -165,6 +169,10 @@ public class Intro : IMinigame
+ 
+ 	public Intro(int startingGameMode)
+ 	{
++		if (Game1.graphics.GraphicsDevice.Viewport.Height <= 600)
++		{
++			pixelScale = 2;
++		}
+ 		texture = Game1.content.Load<Texture2D>("Minigames\\Intro");
+ 		roadsideTexture = Game1.content.Load<Texture2D>("Maps\\spring_outdoorsTileSheet");
+ 		cloudTexture = Game1.content.Load<Texture2D>("Minigames\\Clouds");
+@@ -407,20 +415,25 @@ public class Intro : IMinigame
+ 				globalYPan = screenHeight * pixelScale;
+ 				currentState = 2;
+ 				transformMatrix = Matrix.CreateScale(pixelScale);
+-				transformMatrix.Translation = new Vector3(0f, globalYPan, 0f);
++				transformMatrix.Translation = new Vector3(0f, (float)Math.Round(globalYPan), 0f);
+ 				if (roadNoise != null)
+ 				{
+ 					roadNoise.SetVariable("Volume", 0);
+ 					roadNoise.Play();
+ 				}
++				if (VitaPlatform.IsVita)
++				{
++					GC.Collect();
++					GC.WaitForPendingFinalizers();
++					GC.Collect();
++				}
+ 				Game1.game1.loadForNewGame();
+ 			}
+ 			break;
+ 		case 2:
+ 		{
+ 			int startPanY = screenHeight * pixelScale;
+-			int endPanY = -Math.Max(0, 900 - Game1.graphics.GraphicsDevice.Viewport.Height);
+-			endPanY = -(int)(240f * (540f / (float)Game1.graphics.GraphicsDevice.Viewport.Height));
++			int endPanY = (DrawTargetHeight <= 600) ? -70 : -Math.Max(0, 900 - DrawTargetHeight);
+ 			globalYPanDY = Math.Max(1f, globalYPan / 100f);
+ 			globalYPan -= globalYPanDY;
+ 			if (globalYPan <= (float)endPanY)
+@@ -428,7 +441,7 @@ public class Intro : IMinigame
+ 				globalYPan = endPanY;
+ 			}
+ 			transformMatrix = Matrix.CreateScale(pixelScale);
+-			transformMatrix.Translation = new Vector3(0f, globalYPan, 0f);
++			transformMatrix.Translation = new Vector3(0f, (float)Math.Round(globalYPan), 0f);
+ 			updateRoad(time);
+ 			if (roadNoise != null)
+ 			{
+@@ -631,7 +644,7 @@ public class Intro : IMinigame
+ 		}
+ 		for (int k = 0; k < 8; k++)
+ 		{
+-			b.Draw(treeStripTexture, new Vector2((float)(k * 256) - treePosition, 110f), new Rectangle(0, 0, 256, 64), Color.White);
++			b.Draw(treeStripTexture, destinationRectangle: new Rectangle((int)Math.Floor((float)(k * 256) - treePosition), 110, 257, 64), sourceRectangle: new Rectangle(0, 0, 256, 64), color: Color.White);
+ 		}
+ 		for (int l = 0; l < road.Count; l++)
+ 		{
+@@ -697,13 +710,23 @@ public class Intro : IMinigame
+ 		b.End();
+ 	}
+ 
++	/// <summary>Width of the surface the road is drawn on. Below 100% zoom the game draws minigames into <see cref="P:StardewValley.Game1.screen" />, which has <see cref="F:StardewValley.Game1.viewport" />'s size rather than the back buffer's; sizing the road from the back buffer left the right of the screen unpainted (Vita port, where the zoom is never 100%).</summary>
++	private static int DrawTargetWidth => Game1.graphics.GraphicsDevice.Viewport.Width;
++
++	/// <summary>Height of the surface the road is drawn on; see <see cref="P:StardewValley.Minigames.Intro.DrawTargetWidth" />.</summary>
++	private static int DrawTargetHeight => Game1.graphics.GraphicsDevice.Viewport.Height;
++
+ 	public void changeScreenSize()
+ 	{
+-		if (Game1.graphics.GraphicsDevice.Viewport.Height < 1000)
++		if (DrawTargetHeight <= 600)
++		{
++			pixelScale = 2;
++		}
++		else if (DrawTargetHeight < 1000)
+ 		{
+ 			pixelScale = 3;
+ 		}
+-		else if (Game1.graphics.GraphicsDevice.Viewport.Width > 2600)
++		else if (DrawTargetWidth > 2600)
+ 		{
+ 			pixelScale = 5;
+ 		}
+@@ -712,8 +735,8 @@ public class Intro : IMinigame
+ 			pixelScale = 4;
+ 		}
+ 		transformMatrix = Matrix.CreateScale(pixelScale);
+-		screenWidth = Game1.graphics.GraphicsDevice.Viewport.Width / pixelScale;
+-		screenHeight = Game1.graphics.GraphicsDevice.Viewport.Height / pixelScale;
++		screenWidth = DrawTargetWidth / pixelScale;
++		screenHeight = DrawTargetHeight / pixelScale;
+ 		createBeginningOfLevel();
+ 	}
+ 

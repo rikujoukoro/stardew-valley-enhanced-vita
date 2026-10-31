@@ -1,0 +1,185 @@
+diff --git a/StardewValley.Pathfinding/PathFindController.cs b/StardewValley.Pathfinding/PathFindController.cs
+index 2be0170523193e5f99480e05786becf20d9538ba..a5da032affbbbabcadc871767b2d61d4e0b07bb7 100644
+--- a/StardewValley.Pathfinding/PathFindController.cs
++++ b/StardewValley.Pathfinding/PathFindController.cs
+@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework;
+ using StardewValley.Audio;
+ using StardewValley.Extensions;
+ using StardewValley.Locations;
++using StardewValley.TerrainFeatures;
+ using xTile.Tiles;
+ 
+ namespace StardewValley.Pathfinding;
+@@ -156,12 +157,12 @@ public class PathFindController
+ 		}
+ 		if (Game1.activeClickableMenu == null || Game1.IsMultiplayer)
+ 		{
+-			timerSinceLastCheckPoint += time.ElapsedGameTime.Milliseconds;
++			timerSinceLastCheckPoint += StardewValley.Character.ElapsedMs(time);
+ 			Vector2 position = character.Position;
+ 			moveCharacter(time);
+ 			if (character.Position.Equals(position))
+ 			{
+-				pausedTimer += time.ElapsedGameTime.Milliseconds;
++				pausedTimer += StardewValley.Character.ElapsedMs(time);
+ 			}
+ 			else
+ 			{
+@@ -215,13 +216,14 @@ public class PathFindController
+ 						closedList.Add(nid);
+ 						continue;
+ 					}
+-					PathNode neighbor = new PathNode(nx, ny, currentNode);
+-					neighbor.g = (byte)(currentNode.g + 1);
+-					if (!ignore_obstructions && location.isCollidingPosition(new Rectangle(neighbor.x * 64 + 1, neighbor.y * 64 + 1, 62, 62), Game1.viewport, character is Farmer, 0, glider: false, character, pathfinding: true))
++					if (!ignore_obstructions && location.isCollidingPosition(new Rectangle(nx * 64 + 1, ny * 64 + 1, 62, 62), Game1.viewport, character is Farmer, 0, glider: false, character, pathfinding: true))
+ 					{
+ 						closedList.Add(nid);
+ 						continue;
+ 					}
++					// Rejected tiles need no node; closedList already prevents repeat collision checks.
++					PathNode neighbor = new PathNode(nx, ny, currentNode);
++					neighbor.g = (byte)(currentNode.g + 1);
+ 					int f = ng + (Math.Abs(endPoint.X - nx) + Math.Abs(endPoint.Y - ny));
+ 					closedList.Add(nid);
+ 					openList.Enqueue(neighbor, f);
+@@ -288,16 +290,20 @@ public class PathFindController
+ 		}
+ 		else if (!(location is MovieTheater))
+ 		{
++			long crowdStart = VitaPlatform.BeginHotSection();
+ 			string name = character.Name;
+ 			for (int i = 0; i < location.characters.Count; i++)
+ 			{
+ 				NPC c = location.characters[i];
+-				if (!c.Equals(character) && c.GetBoundingBox().Intersects(bbox) && c.isMoving() && string.Compare(c.Name, name, StringComparison.Ordinal) < 0)
++				// Port: the cheap tests first; every walking NPC runs this against every NPC in its location each tick.
++				if (c.isMoving() && !c.Equals(character) && string.Compare(c.Name, name, StringComparison.Ordinal) < 0 && c.GetBoundingBox().Intersects(bbox))
+ 				{
++					VitaPlatform.EndHotSection(VitaPlatform.HotSection.NpcCrowd, crowdStart);
+ 					character.Halt();
+ 					return;
+ 				}
+ 			}
++			VitaPlatform.EndHotSection(VitaPlatform.HotSection.NpcCrowd, crowdStart);
+ 		}
+ 		if (bbox.Left < targetTile.Left && bbox.Right < targetTile.Right)
+ 		{
+@@ -315,7 +321,17 @@ public class PathFindController
+ 		{
+ 			character.SetMovingUp(b: true);
+ 		}
++		long moveStart = VitaPlatform.BeginHotSection();
+ 		character.MovePosition(time, Game1.viewport, location);
++		VitaPlatform.EndHotSection(VitaPlatform.HotSection.NpcMove, moveStart);
++		long warpsStart = VitaPlatform.BeginHotSection();
++		moveCharacterWarps(targetTile);
++		VitaPlatform.EndHotSection(VitaPlatform.HotSection.NpcWarps, warpsStart);
++	}
++
++	/// <summary>The end of <see cref="moveCharacter" />, split off so the port can time it.</summary>
++	private void moveCharacterWarps(Rectangle targetTile)
++	{
+ 		if (nonDestructivePathing)
+ 		{
+ 			if (targetTile.Intersects(character.nextPosition(character.FacingDirection)))
+@@ -431,6 +447,8 @@ public class PathFindController
+ 
+ 	public static Stack<Point> findPathForNPCSchedules(Point startPoint, Point endPoint, GameLocation location, int limit, Character npc)
+ 	{
++		// Port: the schedules of a load are seconds of pathfinding; keep the loading screen moving.
++		Game1.PumpVitaLoadingScreen();
+ 		PriorityQueue openList = new PriorityQueue();
+ 		HashSet<int> closedList = new HashSet<int>();
+ 		int iterations = 0;
+@@ -438,6 +456,11 @@ public class PathFindController
+ 		PathNode previousNode = (PathNode)openList.Peek();
+ 		int layerWidth = location.map.Layers[0].LayerWidth;
+ 		int layerHeight = location.map.Layers[0].LayerHeight;
++		// Port: a tile's answer is asked again from each neighbor still open, and every answer scanned
++		// all the location's large terrain features; both are kept for this search (the world doesn't
++		// change during it). Schedules for every NPC are planned while a save loads and at day start.
++		Dictionary<int, bool> impassableTiles = new Dictionary<int, bool>();
++		Dictionary<int, LargeTerrainFeature> largeFeatureTiles = null;
+ 		while (!openList.IsEmpty())
+ 		{
+ 			PathNode currentNode = openList.Dequeue();
+@@ -457,7 +480,7 @@ public class PathFindController
+ 				}
+ 				PathNode neighbor = new PathNode(neighbor_tile_x, neighbor_tile_y, currentNode);
+ 				neighbor.g = (byte)(currentNode.g + 1);
+-				if ((neighbor.x == endPoint.X && neighbor.y == endPoint.Y) || (neighbor.x >= 0 && neighbor.y >= 0 && neighbor.x < layerWidth && neighbor.y < layerHeight && !isPositionImpassableForNPCSchedule(location, neighbor.x, neighbor.y, npc)))
++				if ((neighbor.x == endPoint.X && neighbor.y == endPoint.Y) || (neighbor.x >= 0 && neighbor.y >= 0 && neighbor.x < layerWidth && neighbor.y < layerHeight && !isPositionImpassableForNPCSchedule(location, neighbor.x, neighbor.y, npc, nid, impassableTiles, ref largeFeatureTiles)))
+ 				{
+ 					int f = neighbor.g + getPreferenceValueForTerrainType(location, neighbor.x, neighbor.y) + (Math.Abs(endPoint.X - neighbor.x) + Math.Abs(endPoint.Y - neighbor.y) + (((neighbor.x == currentNode.x && neighbor.x == previousNode.x) || (neighbor.y == currentNode.y && neighbor.y == previousNode.y)) ? (-2) : 0));
+ 					if (!openList.Contains(neighbor, f))
+@@ -477,11 +500,59 @@ public class PathFindController
+ 	}
+ 
+ 	protected static bool isPositionImpassableForNPCSchedule(GameLocation loc, int x, int y, Character npc)
++	{
++		if (isPositionImpassableForNPCScheduleExceptLargeFeatures(loc, x, y, npc) || object.Equals(false, loc.getLargeTerrainFeatureAt(x, y)?.isPassable(npc)))
++		{
++			return true;
++		}
++		return false;
++	}
++
++	/// <summary>Port: <see cref="isPositionImpassableForNPCSchedule(GameLocation, int, int, Character)" /> with the answers and the tiles' large terrain features of one search (<see cref="findPathForNPCSchedules(Point, Point, GameLocation, int, Character)" />).</summary>
++	private static bool isPositionImpassableForNPCSchedule(GameLocation loc, int x, int y, Character npc, int tileId, Dictionary<int, bool> answers, ref Dictionary<int, LargeTerrainFeature> largeFeatureTiles)
++	{
++		if (answers.TryGetValue(tileId, out bool known))
++		{
++			return known;
++		}
++		bool impassable = isPositionImpassableForNPCScheduleExceptLargeFeatures(loc, x, y, npc);
++		if (!impassable && loc.largeTerrainFeatures.Count > 0)
++		{
++			if (largeFeatureTiles == null)
++			{
++				largeFeatureTiles = new Dictionary<int, LargeTerrainFeature>();
++				foreach (LargeTerrainFeature feature in loc.largeTerrainFeatures)
++				{
++					// The tiles whose centre the box contains, as getLargeTerrainFeatureAt tests; the first feature wins, as there.
++					Rectangle box = feature.getBoundingBox();
++					for (int tileX = (box.Left - 32) / 64 - 1; tileX * 64 + 32 < box.Right; tileX++)
++					{
++						for (int tileY = (box.Top - 32) / 64 - 1; tileY * 64 + 32 < box.Bottom; tileY++)
++						{
++							if (box.Contains(tileX * 64 + 32, tileY * 64 + 32))
++							{
++								largeFeatureTiles.TryAdd(PathNode.ComputeHash(tileX, tileY), feature);
++							}
++						}
++					}
++				}
++			}
++			if (largeFeatureTiles.TryGetValue(tileId, out LargeTerrainFeature large) && !large.isPassable(npc))
++			{
++				impassable = true;
++			}
++		}
++		answers[tileId] = impassable;
++		return impassable;
++	}
++
++	/// <summary>Port: <see cref="isPositionImpassableForNPCSchedule(GameLocation, int, int, Character)" /> without its large terrain feature test.</summary>
++	private static bool isPositionImpassableForNPCScheduleExceptLargeFeatures(GameLocation loc, int x, int y, Character npc)
+ 	{
+ 		Tile tile = loc.Map.RequireLayer("Buildings").Tiles[x, y];
+ 		if (tile != null && tile.TileIndex != -1)
+ 		{
+-			if (FrameworkExtensions.TryGetValue(tile.TileIndexProperties, "Action", out var value) || tile.Properties.TryGetValue("Action", out value))
++			if (FrameworkExtensions.TryGetValue(tile.TileIndexProperties, "Action", out var value) || FrameworkExtensions.TryGetValue(tile.PropertiesIfAny, "Action", out value))
+ 			{
+ 				if (value.StartsWith("LockedDoorWarp"))
+ 				{
+@@ -508,7 +579,7 @@ public class PathFindController
+ 				return true;
+ 			}
+ 		}
+-		if (object.Equals(false, loc.terrainFeatures.GetValueOrDefault(new Vector2(x, y))?.isPassable(npc)) || object.Equals(false, loc.getLargeTerrainFeatureAt(x, y)?.isPassable(npc)))
++		if (object.Equals(false, loc.terrainFeatures.GetValueOrDefault(new Vector2(x, y))?.isPassable(npc)))
+ 		{
+ 			return true;
+ 		}

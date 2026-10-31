@@ -1,0 +1,63 @@
+diff --git a/StardewValley.TerrainFeatures/Bush.cs b/StardewValley.TerrainFeatures/Bush.cs
+index d5482db1ae19d5c94b6decdcf26d8b309b667aa7..9f1d8c06e53f67985281445372f8fd2f43c5207c 100644
+--- a/StardewValley.TerrainFeatures/Bush.cs
++++ b/StardewValley.TerrainFeatures/Bush.cs
+@@ -351,7 +351,7 @@ public class Bush : LargeTerrainFeature
+ 	{
+ 		if (shakeTimer > 0f)
+ 		{
+-			shakeTimer -= time.ElapsedGameTime.Milliseconds;
++			shakeTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 		}
+ 		if (size.Value == 4)
+ 		{
+@@ -384,6 +384,18 @@ public class Bush : LargeTerrainFeature
+ 		return false;
+ 	}
+ 
++	/// <summary>Port: the rustle of walking through (VitaPassableCrops); unlike <see cref="shake" /> it never drops the bush's harvest.</summary>
++	internal void VitaBrushShake(bool left)
++	{
++		if (maxShake == 0f && VitaPlatform.ShakeEnabled)
++		{
++			shakeLeft = left;
++			maxShake = (float)Math.PI / 128f;
++			NeedsUpdate = true;
++			Grass.PlayGrassSound();
++		}
++	}
++
+ 	public void shake(Vector2 tileLocation, bool doEvenIfStillShaking)
+ 	{
+ 		if (!((maxShake == 0f) | doEvenIfStillShaking))
+@@ -391,7 +403,7 @@ public class Bush : LargeTerrainFeature
+ 			return;
+ 		}
+ 		shakeLeft = Game1.player.Tile.X > tileLocation.X || (Game1.player.Tile.X == tileLocation.X && Game1.random.NextBool());
+-		maxShake = (float)Math.PI / 128f;
++		maxShake = (VitaPlatform.ShakeEnabled ? ((float)Math.PI / 128f) : 0f);
+ 		NeedsUpdate = true;
+ 		if (!townBush.Value && readyForHarvest() && inBloom())
+ 		{
+@@ -688,17 +700,18 @@ public class Bush : LargeTerrainFeature
+ 	public override void draw(SpriteBatch spriteBatch)
+ 	{
+ 		Vector2 tileLocation = Tile;
++		int effectiveSize = getEffectiveSize();
+ 		if (drawShadow.Value)
+ 		{
+-			if (getEffectiveSize() > 0)
++			if (effectiveSize > 0)
+ 			{
+-				spriteBatch.Draw(Game1.mouseCursors, Game1.GlobalToLocal(Game1.viewport, new Vector2((tileLocation.X + ((getEffectiveSize() == 1) ? 0.5f : 1f)) * 64f - 51f, tileLocation.Y * 64f - 16f + yDrawOffset)), shadowSourceRect, Color.White, 0f, Vector2.Zero, 4f, flipped.Value ? SpriteEffects.FlipHorizontally : SpriteEffects.None, 1E-06f);
++				spriteBatch.Draw(Game1.mouseCursors, Game1.GlobalToLocal(Game1.viewport, new Vector2((tileLocation.X + ((effectiveSize == 1) ? 0.5f : 1f)) * 64f - 51f, tileLocation.Y * 64f - 16f + yDrawOffset)), shadowSourceRect, Color.White, 0f, Vector2.Zero, 4f, flipped.Value ? SpriteEffects.FlipHorizontally : SpriteEffects.None, 1E-06f);
+ 			}
+ 			else
+ 			{
+ 				spriteBatch.Draw(Game1.shadowTexture, Game1.GlobalToLocal(Game1.viewport, new Vector2(tileLocation.X * 64f + 32f, tileLocation.Y * 64f + 64f - 4f + yDrawOffset)), Game1.shadowTexture.Bounds, Color.White, 0f, new Vector2(Game1.shadowTexture.Bounds.Center.X, Game1.shadowTexture.Bounds.Center.Y), 4f, SpriteEffects.None, 1E-06f);
+ 			}
+ 		}
+-		spriteBatch.Draw(texture.Value, Game1.GlobalToLocal(Game1.viewport, new Vector2(tileLocation.X * 64f + (float)((getEffectiveSize() + 1) * 64 / 2), (tileLocation.Y + 1f) * 64f - (float)((getEffectiveSize() > 0 && (!townBush.Value || getEffectiveSize() != 1) && size.Value != 4) ? 64 : 0) + yDrawOffset)), sourceRect.Value, Color.White, shakeRotation, new Vector2((getEffectiveSize() + 1) * 16 / 2, 32f), 4f, flipped.Value ? SpriteEffects.FlipHorizontally : SpriteEffects.None, (float)(getBoundingBox().Center.Y + 48) / 10000f - tileLocation.X / 1000000f);
++		spriteBatch.Draw(texture.Value, Game1.GlobalToLocal(Game1.viewport, new Vector2(tileLocation.X * 64f + (float)((effectiveSize + 1) * 64 / 2), (tileLocation.Y + 1f) * 64f - (float)((effectiveSize > 0 && (!townBush.Value || effectiveSize != 1) && size.Value != 4) ? 64 : 0) + yDrawOffset)), sourceRect.Value, Color.White, shakeRotation, new Vector2((effectiveSize + 1) * 16 / 2, 32f), 4f, flipped.Value ? SpriteEffects.FlipHorizontally : SpriteEffects.None, (float)(getBoundingBox().Center.Y + 48) / 10000f - tileLocation.X / 1000000f);
+ 	}
+ }

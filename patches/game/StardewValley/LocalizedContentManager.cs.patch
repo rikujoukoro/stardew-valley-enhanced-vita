@@ -1,0 +1,318 @@
+diff --git a/StardewValley/LocalizedContentManager.cs b/StardewValley/LocalizedContentManager.cs
+index 0f8559a519f31e92eacbe2140464e156ea247b51..6dacc88a3386ee7a5429c67bed3c6eea0926047f 100644
+--- a/StardewValley/LocalizedContentManager.cs
++++ b/StardewValley/LocalizedContentManager.cs
+@@ -118,6 +118,10 @@ public class LocalizedContentManager : ContentManager
+ 		}
+ 		_manifest = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+ 		string manifestPath = Path.Combine(GetContentRoot(), "ContentHashes.json");
++		if (VitaPlatform.IsVita && TryLoadManifestCache(manifestPath))
++		{
++			return;
++		}
+ 		if (File.Exists(manifestPath))
+ 		{
+ 			Dictionary<string, object> contentHashes = null;
+@@ -144,6 +148,10 @@ public class LocalizedContentManager : ContentManager
+ 				return;
+ 			}
+ 			_manifest.UnionWith(contentHashes.Keys);
++			if (VitaPlatform.IsVita)
++			{
++				SaveManifestCache(manifestPath);
++			}
+ 		}
+ 		else
+ 		{
+@@ -151,6 +159,73 @@ public class LocalizedContentManager : ContentManager
+ 		}
+ 	}
+ 
++	/// <summary>Port: the manifest's asset names, kept in the game folder (the working directory) after the first boot; parsing ContentHashes.json (~240 KB) took ~450 ms of every boot on the Vita.</summary>
++	private const string ManifestCacheFile = "content-manifest.txt";
++
++	/// <summary>Port: what the cache was made from - ContentHashes.json's size and time - so a changed manifest is parsed again.</summary>
++	private static string ManifestCacheStamp(string manifestPath)
++	{
++		FileInfo info = new FileInfo(manifestPath);
++		return info.Exists ? $"{info.Length}|{info.LastWriteTimeUtc.Ticks}" : null;
++	}
++
++	private static bool TryLoadManifestCache(string manifestPath)
++	{
++		try
++		{
++			string stamp = ManifestCacheStamp(manifestPath);
++			if (stamp == null || !File.Exists(ManifestCacheFile))
++			{
++				return false;
++			}
++			using StreamReader reader = new StreamReader(ManifestCacheFile);
++			if (reader.ReadLine() != stamp)
++			{
++				return false;
++			}
++			string name;
++			while ((name = reader.ReadLine()) != null)
++			{
++				if (name.Length > 0)
++				{
++					_manifest.Add(name);
++				}
++			}
++			return _manifest.Count > 0;
++		}
++		catch (Exception exception)
++		{
++			VitaPlatform.Trace("manifest cache unreadable: " + exception.Message);
++			_manifest.Clear();
++			return false;
++		}
++	}
++
++	private static void SaveManifestCache(string manifestPath)
++	{
++		try
++		{
++			string stamp = ManifestCacheStamp(manifestPath);
++			if (stamp == null)
++			{
++				return;
++			}
++			using StreamWriter writer = new StreamWriter(ManifestCacheFile + ".tmp");
++			writer.WriteLine(stamp);
++			foreach (string name in _manifest)
++			{
++				writer.WriteLine(name);
++			}
++			writer.Close();
++			File.Delete(ManifestCacheFile);
++			File.Move(ManifestCacheFile + ".tmp", ManifestCacheFile);
++		}
++		catch (Exception exception)
++		{
++			VitaPlatform.Trace("manifest cache not written: " + exception.Message);
++		}
++	}
++
+ 	private void EnsureManifestInitialized()
+ 	{
+ 		if (_manifest != null)
+@@ -178,6 +253,140 @@ public class LocalizedContentManager : ContentManager
+ 		: base(serviceProvider, rootDirectory)
+ 	{
+ 		CurrentCulture = currentCulture;
++		MemoryReport.RegisterContentManager(this);
++		if (VitaPlatform.IsVita)
++		{
++			lock (vitaManagers)
++			{
++				vitaManagers.RemoveAll((WeakReference w) => !w.IsAlive);
++				vitaManagers.Add(new WeakReference(this));
++			}
++		}
++	}
++
++	/// <summary>Port: every live manager, for <see cref="VitaForgetOtherLanguages" />.</summary>
++	private static readonly List<WeakReference> vitaManagers = new List<WeakReference>();
++
++	/// <summary>Port: keys (and base keys) loaded at startup before the title screen, preserved across save exits.</summary>
++	private HashSet<string> _vitaStartupAssetKeys;
++
++	/// <summary>Port: records the core startup assets so <see cref="VitaUnloadWorldAssets" /> can drop gameplay-only assets on exit to title.</summary>
++	public void VitaMarkStartupAssetsComplete()
++	{
++		_vitaStartupAssetKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
++		{
++			"tilesheets/tools",
++			"buildings/houses",
++			"tilesheets/bushes",
++			"loosesprites/emojis"
++		};
++		foreach (string key in VitaGetLoadedKeys())
++		{
++			_vitaStartupAssetKeys.Add(key);
++			int dot = key.LastIndexOf('.');
++			if (dot > 0 && key.Length - dot == 6 && key[dot + 3] == '-' && key.LastIndexOf('/') < dot)
++			{
++				_vitaStartupAssetKeys.Add(key.Substring(0, dot));
++			}
++		}
++	}
++
++	/// <summary>Port: unloads gameplay-only textures and data from <see cref="Game1.content" /> when returning to the title screen.</summary>
++	public int VitaUnloadWorldAssets()
++	{
++		if (_vitaStartupAssetKeys == null)
++		{
++			return 0;
++		}
++		fastAssets.Clear();
++		int dropped = VitaForgetAssets(delegate(string key)
++		{
++			if (_vitaStartupAssetKeys.Contains(key))
++			{
++				return false;
++			}
++			int dot = key.LastIndexOf('.');
++			if (dot > 0 && key.Length - dot == 6 && key[dot + 3] == '-' && key.LastIndexOf('/') < dot)
++			{
++				if (_vitaStartupAssetKeys.Contains(key.Substring(0, dot)))
++				{
++					return false;
++				}
++			}
++			if (key.StartsWith("characters/farmer/", StringComparison.OrdinalIgnoreCase) ||
++				key.StartsWith("fonts/", StringComparison.OrdinalIgnoreCase) ||
++				key.StartsWith("terrainfeatures/hoedirt", StringComparison.OrdinalIgnoreCase) ||
++				key.StartsWith("strings/ui", StringComparison.OrdinalIgnoreCase) ||
++				key.StartsWith("strings/stringsfromcsfiles", StringComparison.OrdinalIgnoreCase) ||
++				(key.StartsWith("data/", StringComparison.OrdinalIgnoreCase) && !key.StartsWith("data/events/", StringComparison.OrdinalIgnoreCase) && !key.StartsWith("data/festivals/", StringComparison.OrdinalIgnoreCase)))
++			{
++				return false;
++			}
++			return true;
++		}, dispose: true);
++		loadedAssetNames.RemoveWhere((string name) => !VitaIsKeyLoaded(name.Replace('\\', '/')));
++		return dropped;
++	}
++
++	/// <summary>Port: drops a single asset from this manager and its fast cache.</summary>
++	public new bool VitaForgetAsset(string assetName, bool dispose = false)
++	{
++		if (assetName != null)
++		{
++			fastAssets.Remove(assetName);
++			loadedAssetNames.Remove(assetName);
++		}
++		return base.VitaForgetAsset(assetName, dispose);
++	}
++
++	/// <summary>Port: on the Vita, drops the assets other languages loaded (their own Cursors, fonts, title buttons, non-Latin BmFont sheets, and superseded English base assets) from every manager's cache.</summary>
++	public static int VitaForgetOtherLanguages(bool dispose = true)
++	{
++		LanguageCode code = CurrentLanguageCode;
++		string current = "." + CurrentLanguageString;
++		string keepFontPrefix = code switch
++		{
++			LanguageCode.ja => "fonts/japanese",
++			LanguageCode.zh => "fonts/chinese",
++			LanguageCode.ru => "fonts/russian",
++			LanguageCode.th => "fonts/thai",
++			LanguageCode.ko => "fonts/korean",
++			_ => null
++		};
++		int dropped = 0;
++		lock (vitaManagers)
++		{
++			foreach (WeakReference w in vitaManagers)
++			{
++				if (w.Target is LocalizedContentManager manager)
++				{
++					manager.fastAssets.Clear();
++					dropped += manager.VitaForgetAssets(delegate(string key)
++					{
++						if (key.StartsWith("fonts/japanese", StringComparison.OrdinalIgnoreCase) ||
++							key.StartsWith("fonts/chinese", StringComparison.OrdinalIgnoreCase) ||
++							key.StartsWith("fonts/russian", StringComparison.OrdinalIgnoreCase) ||
++							key.StartsWith("fonts/thai", StringComparison.OrdinalIgnoreCase) ||
++							key.StartsWith("fonts/korean", StringComparison.OrdinalIgnoreCase))
++						{
++							return keepFontPrefix == null || !key.StartsWith(keepFontPrefix, StringComparison.OrdinalIgnoreCase);
++						}
++						int dot = key.LastIndexOf('.');
++						if (dot > 0 && key.Length - dot == 6 && key[dot + 3] == '-' && key.LastIndexOf('/') < dot)
++						{
++							return !key.EndsWith(current, StringComparison.OrdinalIgnoreCase);
++						}
++						if (code != LanguageCode.en && code != LanguageCode.mod && manager.DoesAssetExist<object>(key + current))
++						{
++							return true;
++						}
++						return false;
++					}, dispose);
++					manager.loadedAssetNames.RemoveWhere((string name) => !manager.VitaIsKeyLoaded(name.Replace('\\', '/')));
++				}
++			}
++		}
++		return dropped;
+ 	}
+ 
+ 	public LocalizedContentManager(IServiceProvider serviceProvider, string rootDirectory)
+@@ -337,12 +546,74 @@ public class LocalizedContentManager : ContentManager
+ 		{
+ 			throw new ContentLoadException("Could not load " + localizedAssetName + " asset!");
+ 		}
+-		return base.Load<T>(localizedAssetName);
++		T asset = base.Load<T>(localizedAssetName);
++		MemoryReport.TrackAsset(this, localizedAssetName, asset);
++		return asset;
++	}
++
++	public override void Unload()
++	{
++		MemoryReport.ForgetAssets(this);
++		loadedAssetNames.Clear();
++		fastAssets.Clear();
++		base.Unload();
++	}
++
++	/// <summary>Asset names (as passed to <see cref="Load{T}(string)" />) loaded since the last unload.</summary>
++	private readonly HashSet<string> loadedAssetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
++
++	/// <summary>Whether this manager already holds the asset, so loading it again costs no memory.</summary>
++	public bool IsLoaded(string assetName)
++	{
++		return loadedAssetNames.Contains(assetName);
++	}
++
++	/// <summary>Port: assets already loaded in <see cref="fastAssetsLanguage" />, by the exact name they were asked for.</summary>
++	/// <remarks>
++	/// The game asks for its data every frame (DataLoader.Machines once per machine per tick, say), and
++	/// each Load of a loaded asset still built its .xnb path, searched the manifest and FNA's cache with
++	/// case-insensitive hashing and noted it for the memory report: 7% of the main thread on a farm full
++	/// of kegs and jars. A repeat now costs one ordinal lookup; misses take the full path as before.
++	/// Cleared on Unload (assets go away only with their whole manager) and on a language change.
++	/// </remarks>
++	private readonly Dictionary<string, object> fastAssets = new Dictionary<string, object>(StringComparer.Ordinal);
++
++	private LanguageCode fastAssetsLanguage;
++
++	/// <summary>Port: on the Vita, assets come from Content.pak when it holds them (see <see cref="VitaContentPack" />).</summary>
++	protected override Stream OpenStream(string assetName)
++	{
++		return VitaContentPack.TryOpen(assetName) ?? base.OpenStream(assetName);
+ 	}
+ 
+ 	public override T Load<T>(string assetName)
+ 	{
+-		return Load<T>(assetName, CurrentLanguageCode);
++		if (assetName != null && fastAssetsLanguage == CurrentLanguageCode && fastAssets.TryGetValue(assetName, out object cached) && cached is T hit)
++		{
++			return hit;
++		}
++		// Port: keeps the loading screen moving through a load's map and texture reads.
++		Game1.PumpVitaLoadingScreen();
++		double loadStart = VitaPlatform.BeginSection();
++		T asset = Load<T>(assetName, CurrentLanguageCode);
++		loadedAssetNames.Add(assetName);
++		double loadSpent = VitaPlatform.ElapsedSince(loadStart);
++		// Port: on the Vita every trace line is flushed to the memory card (~10 ms), which was 5-10% of the
++		// main thread while a save loaded; only the loads that matter are logged there.
++		if (loadSpent >= (VitaPlatform.IsVita ? 100.0 : 15.0))
++		{
++			VitaPlatform.Trace($"slow: load {assetName} {loadSpent:F0} ms");
++		}
++		if (fastAssetsLanguage != CurrentLanguageCode)
++		{
++			fastAssets.Clear();
++			fastAssetsLanguage = CurrentLanguageCode;
++		}
++		if (asset != null)
++		{
++			fastAssets[assetName] = asset;
++		}
++		return asset;
+ 	}
+ 
+ 	public virtual T Load<T>(string assetName, LanguageCode language)

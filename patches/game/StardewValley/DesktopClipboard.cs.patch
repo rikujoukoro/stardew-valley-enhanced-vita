@@ -1,0 +1,99 @@
+diff --git a/StardewValley/DesktopClipboard.cs b/StardewValley/DesktopClipboard.cs
+index 6d8b3205a06d58ba96b078e06ac52405d804b783..f64995516df9b3224088fa409ba11db7be519e94 100644
+--- a/StardewValley/DesktopClipboard.cs
++++ b/StardewValley/DesktopClipboard.cs
+@@ -1,45 +1,25 @@
+-using System.Threading;
+-using System.Windows;
+-using StardewValley.NativeClipboard;
++using System;
++using SDL3;
+ 
+ namespace StardewValley;
+ 
++/// <summary>System clipboard access through SDL3 (bundled with FNA).</summary>
++/// <remarks>
++/// Port: the XNA build bound SDL2 per OS (StardewValley.NativeClipboard) and fell back to the WPF
++/// clipboard on an STA thread. Under FNA, SDL3 is always loaded and handles every platform; where it
++/// has no clipboard (e.g. the Vita), reads return empty text and writes report failure.
++/// </remarks>
+ public class DesktopClipboard
+ {
+ 	public const bool IsAvailable = true;
+ 
+ 	public static bool GetText(ref string output)
+ 	{
+-		output = SdlClipboard.GetText();
+-		if (output != null)
++		try
+ 		{
+-			return true;
++			output = SDL.SDL_HasClipboardText() ? (SDL.SDL_GetClipboardText() ?? "") : "";
+ 		}
+-		if (Clipboard.ContainsText())
+-		{
+-			bool success = false;
+-			string clipboard_text = "";
+-			Thread thread = new Thread(() =>
+-			{
+-				for (int i = 0; i < 10; i++)
+-				{
+-					try
+-					{
+-						clipboard_text = Clipboard.GetText();
+-						success = true;
+-						break;
+-					}
+-					catch
+-					{
+-					}
+-				}
+-			});
+-			thread.SetApartmentState(ApartmentState.STA);
+-			thread.Start();
+-			thread.Join();
+-			output = clipboard_text;
+-		}
+-		else
++		catch (Exception)
+ 		{
+ 			output = "";
+ 		}
+@@ -48,33 +28,13 @@ public class DesktopClipboard
+ 
+ 	public static bool SetText(string text)
+ 	{
+-		if (text == null)
++		try
+ 		{
+-			text = "";
++			return SDL.SDL_SetClipboardText(text ?? "");
+ 		}
+-		if (SdlClipboard.SetText(text))
++		catch (Exception)
+ 		{
+-			return true;
++			return false;
+ 		}
+-		bool success = false;
+-		Thread thread = new Thread(() =>
+-		{
+-			for (int i = 0; i < 10; i++)
+-			{
+-				try
+-				{
+-					Clipboard.SetText(text);
+-					success = true;
+-					break;
+-				}
+-				catch
+-				{
+-				}
+-			}
+-		});
+-		thread.SetApartmentState(ApartmentState.STA);
+-		thread.Start();
+-		thread.Join();
+-		return success;
+ 	}
+ }

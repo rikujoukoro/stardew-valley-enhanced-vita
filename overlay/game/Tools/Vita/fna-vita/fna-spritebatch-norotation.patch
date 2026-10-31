@@ -1,0 +1,57 @@
+--- a/src/Graphics/SpriteBatch.cs
++++ b/src/Graphics/SpriteBatch.cs
+@@ -476,8 +476,8 @@
+ 				color,
+ 				origin.X / sourceW / (float) texture.Width,
+ 				origin.Y / sourceH / (float) texture.Height,
+-				(float) Math.Sin(rotation),
+-				(float) Math.Cos(rotation),
++				(rotation == 0f) ? 0f : (float) Math.Sin(rotation), // Vita port: most sprites are unrotated
++				(rotation == 0f) ? 1f : (float) Math.Cos(rotation),
+ 				layerDepth,
+ 				(int) (effects & (SpriteEffects) 0x03)
+ 			);
+@@ -537,8 +537,8 @@
+ 				color,
+ 				origin.X / sourceW / (float) texture.Width,
+ 				origin.Y / sourceH / (float) texture.Height,
+-				(float) Math.Sin(rotation),
+-				(float) Math.Cos(rotation),
++				(rotation == 0f) ? 0f : (float) Math.Sin(rotation), // Vita port: most sprites are unrotated
++				(rotation == 0f) ? 1f : (float) Math.Cos(rotation),
+ 				layerDepth,
+ 				(int) (effects & (SpriteEffects) 0x03)
+ 			);
+@@ -669,8 +669,8 @@
+ 				color,
+ 				origin.X / sourceW / (float) texture.Width,
+ 				origin.Y / sourceH / (float) texture.Height,
+-				(float) Math.Sin(rotation),
+-				(float) Math.Cos(rotation),
++				(rotation == 0f) ? 0f : (float) Math.Sin(rotation), // Vita port: most sprites are unrotated
++				(rotation == 0f) ? 1f : (float) Math.Cos(rotation),
+ 				layerDepth,
+ 				(int) (effects & (SpriteEffects) 0x03)
+ 			);
+@@ -874,8 +874,8 @@
+ 					color,
+ 					offsetX / sourceW / (float) textureValue.Width,
+ 					offsetY / sourceH / (float) textureValue.Height,
+-					(float) Math.Sin(rotation),
+-					(float) Math.Cos(rotation),
++					(rotation == 0f) ? 0f : (float) Math.Sin(rotation), // Vita port: most sprites are unrotated
++					(rotation == 0f) ? 1f : (float) Math.Cos(rotation),
+ 					layerDepth,
+ 					(int) effects
+ 				);
+@@ -1070,8 +1070,8 @@
+ 					color,
+ 					offsetX / sourceW / (float) textureValue.Width,
+ 					offsetY / sourceH / (float) textureValue.Height,
+-					(float) Math.Sin(rotation),
+-					(float) Math.Cos(rotation),
++					(rotation == 0f) ? 0f : (float) Math.Sin(rotation), // Vita port: most sprites are unrotated
++					(rotation == 0f) ? 1f : (float) Math.Cos(rotation),
+ 					layerDepth,
+ 					(int) effects
+ 				);

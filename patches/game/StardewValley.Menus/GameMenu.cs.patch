@@ -1,0 +1,194 @@
+diff --git a/StardewValley.Menus/GameMenu.cs b/StardewValley.Menus/GameMenu.cs
+index 8a473f559105ec381ec6caf18709eec1f6fc81c6..8e8db80d8d277a9471154aedec5e2f479e703ba4 100644
+--- a/StardewValley.Menus/GameMenu.cs
++++ b/StardewValley.Menus/GameMenu.cs
+@@ -1,3 +1,4 @@
++using System;
+ using System.Collections.Generic;
+ using System.Linq;
+ using Microsoft.Xna.Framework;
+@@ -94,7 +95,7 @@ public class GameMenu : IClickableMenu
+ 			tryDefaultIfNoDownNeighborExists = true,
+ 			fullyImmutable = true
+ 		});
+-		pages.Add(new InventoryPage(xPositionOnScreen, yPositionOnScreen, width, height));
++		VitaAddPage((x, y, w, h) => new InventoryPage(x, y, w, h));
+ 		tabs.Add(new ClickableComponent(new Rectangle(xPositionOnScreen + 128, yPositionOnScreen + IClickableMenu.tabYPositionRelativeToMenuY + 64, 64, 64), "skills", Game1.content.LoadString("Strings\\UI:GameMenu_Skills"))
+ 		{
+ 			myID = 12341,
+@@ -104,7 +105,7 @@ public class GameMenu : IClickableMenu
+ 			tryDefaultIfNoDownNeighborExists = true,
+ 			fullyImmutable = true
+ 		});
+-		pages.Add(new SkillsPage(xPositionOnScreen, yPositionOnScreen, width + ((LocalizedContentManager.CurrentLanguageCode == LocalizedContentManager.LanguageCode.ru || LocalizedContentManager.CurrentLanguageCode == LocalizedContentManager.LanguageCode.it) ? 64 : 0), height));
++		VitaAddPage((x, y, w, h) => new SkillsPage(x, y, w + ((LocalizedContentManager.CurrentLanguageCode == LocalizedContentManager.LanguageCode.ru || LocalizedContentManager.CurrentLanguageCode == LocalizedContentManager.LanguageCode.it) ? 64 : 0), h));
+ 		tabs.Add(new ClickableComponent(new Rectangle(xPositionOnScreen + 192, yPositionOnScreen + IClickableMenu.tabYPositionRelativeToMenuY + 64, 64, 64), "social", Game1.content.LoadString("Strings\\UI:GameMenu_Social"))
+ 		{
+ 			myID = 12342,
+@@ -114,7 +115,7 @@ public class GameMenu : IClickableMenu
+ 			tryDefaultIfNoDownNeighborExists = true,
+ 			fullyImmutable = true
+ 		});
+-		pages.Add(new SocialPage(xPositionOnScreen, yPositionOnScreen, width + 36, height));
++		VitaAddPage((x, y, w, h) => new SocialPage(x, y, w + 36, h));
+ 		tabs.Add(new ClickableComponent(new Rectangle(xPositionOnScreen + 256, yPositionOnScreen + IClickableMenu.tabYPositionRelativeToMenuY + 64, 64, 64), "map", Game1.content.LoadString("Strings\\UI:GameMenu_Map"))
+ 		{
+ 			myID = 12343,
+@@ -124,7 +125,7 @@ public class GameMenu : IClickableMenu
+ 			tryDefaultIfNoDownNeighborExists = true,
+ 			fullyImmutable = true
+ 		});
+-		pages.Add(new MapPage(xPositionOnScreen, yPositionOnScreen, width, height));
++		VitaAddPage((x, y, w, h) => new MapPage(x, y, w, h));
+ 		tabs.Add(new ClickableComponent(new Rectangle(xPositionOnScreen + 320, yPositionOnScreen + IClickableMenu.tabYPositionRelativeToMenuY + 64, 64, 64), "crafting", Game1.content.LoadString("Strings\\UI:GameMenu_Crafting"))
+ 		{
+ 			myID = 12344,
+@@ -134,7 +135,7 @@ public class GameMenu : IClickableMenu
+ 			tryDefaultIfNoDownNeighborExists = true,
+ 			fullyImmutable = true
+ 		});
+-		pages.Add(new CraftingPage(xPositionOnScreen, yPositionOnScreen, width, height));
++		VitaAddPage((x, y, w, h) => new CraftingPage(x, y, w, h));
+ 		tabs.Add(new ClickableComponent(new Rectangle(xPositionOnScreen + 384, yPositionOnScreen + IClickableMenu.tabYPositionRelativeToMenuY + 64, 64, 64), "animals", Game1.content.LoadString("Strings\\1_6_Strings:GameMenu_Animals"))
+ 		{
+ 			myID = 12345,
+@@ -144,7 +145,7 @@ public class GameMenu : IClickableMenu
+ 			tryDefaultIfNoDownNeighborExists = true,
+ 			fullyImmutable = true
+ 		});
+-		pages.Add(new AnimalPage(xPositionOnScreen, yPositionOnScreen, width - 64 - 16, height));
++		VitaAddPage((x, y, w, h) => new AnimalPage(x, y, w - 64 - 16, h));
+ 		tabs.Add(new ClickableComponent(new Rectangle(xPositionOnScreen + 448, yPositionOnScreen + IClickableMenu.tabYPositionRelativeToMenuY + 64, 64, 64), "powers", Game1.content.LoadString("Strings\\1_6_Strings:GameMenu_Powers"))
+ 		{
+ 			myID = 12346,
+@@ -154,7 +155,7 @@ public class GameMenu : IClickableMenu
+ 			tryDefaultIfNoDownNeighborExists = true,
+ 			fullyImmutable = true
+ 		});
+-		pages.Add(new PowersTab(xPositionOnScreen, yPositionOnScreen, width - 64 - 16, height));
++		VitaAddPage((x, y, w, h) => new PowersTab(x, y, w - 64 - 16, h));
+ 		tabs.Add(new ClickableComponent(new Rectangle(xPositionOnScreen + 512, yPositionOnScreen + IClickableMenu.tabYPositionRelativeToMenuY + 64, 64, 64), "collections", Game1.content.LoadString("Strings\\UI:GameMenu_Collections"))
+ 		{
+ 			myID = 12347,
+@@ -164,7 +165,7 @@ public class GameMenu : IClickableMenu
+ 			tryDefaultIfNoDownNeighborExists = true,
+ 			fullyImmutable = true
+ 		});
+-		pages.Add(new CollectionsPage(xPositionOnScreen, yPositionOnScreen, width - 64 - 16, height));
++		VitaAddPage((x, y, w, h) => new CollectionsPage(x, y, w - 64 - 16, h));
+ 		tabs.Add(new ClickableComponent(new Rectangle(xPositionOnScreen + 576, yPositionOnScreen + IClickableMenu.tabYPositionRelativeToMenuY + 64, 64, 64), "options", Game1.content.LoadString("Strings\\UI:GameMenu_Options"))
+ 		{
+ 			myID = 12348,
+@@ -175,7 +176,7 @@ public class GameMenu : IClickableMenu
+ 			fullyImmutable = true
+ 		});
+ 		int extraWidth = ((LocalizedContentManager.CurrentLanguageCode == LocalizedContentManager.LanguageCode.ru) ? 96 : ((LocalizedContentManager.CurrentLanguageCode == LocalizedContentManager.LanguageCode.tr || LocalizedContentManager.CurrentLanguageCode == LocalizedContentManager.LanguageCode.fr) ? 192 : 0));
+-		pages.Add(new OptionsPage(xPositionOnScreen, yPositionOnScreen, width + extraWidth, height));
++		VitaAddPage((x, y, w, h) => new OptionsPage(x, y, w + extraWidth, h));
+ 		tabs.Add(new ClickableComponent(new Rectangle(xPositionOnScreen + 640, yPositionOnScreen + IClickableMenu.tabYPositionRelativeToMenuY + 64, 64, 64), "exit", Game1.content.LoadString("Strings\\UI:GameMenu_Exit"))
+ 		{
+ 			myID = 12349,
+@@ -184,13 +185,14 @@ public class GameMenu : IClickableMenu
+ 			tryDefaultIfNoDownNeighborExists = true,
+ 			fullyImmutable = true
+ 		});
+-		pages.Add(new ExitPage(xPositionOnScreen, yPositionOnScreen, width - 64 - 16, height));
++		VitaAddPage((x, y, w, h) => new ExitPage(x, y, w - 64 - 16, h));
+ 		if ((Game1.activeClickableMenu == null) & playOpeningSound)
+ 		{
+ 			Game1.playSound("bigSelect");
+ 		}
+ 		forcePreventClose = false;
+ 		Game1.RequireLocation<CommunityCenter>("CommunityCenter").refreshBundlesIngredientsInfo();
++		VitaEnsurePage(currentTab);
+ 		pages[currentTab].populateClickableComponentList();
+ 		AddTabsToClickableComponents(pages[currentTab]);
+ 		if (Game1.options.SnappyMenus)
+@@ -199,6 +201,49 @@ public class GameMenu : IClickableMenu
+ 		}
+ 	}
+ 
++	/// <summary>Port: on the Vita, how to build each page not built yet (null once built); see <see cref="VitaAddPage" />.</summary>
++	private readonly List<Func<int, int, int, int, IClickableMenu>> _vitaPageFactories = new List<Func<int, int, int, int, IClickableMenu>>();
++
++	private int _vitaPageX;
++
++	private int _vitaPageY;
++
++	private int _vitaPageWidth;
++
++	private int _vitaPageHeight;
++
++	/// <summary>Port: adds a page. Elsewhere it is built here as before; on the Vita only when its tab is first shown (<see cref="VitaEnsurePage" />), at the menu's opening size: building all ten when Start was pressed (every collection item, every villager, every recipe) took ~140 ms on the Vita, a visible hitch each time. The game doesn't run while the menu is open, so a page built later shows the same state. Pages are only reached through the current tab, which only <see cref="changeTab" /> moves.</summary>
++	private void VitaAddPage(Func<int, int, int, int, IClickableMenu> create)
++	{
++		if (_vitaPageFactories.Count == 0)
++		{
++			_vitaPageX = xPositionOnScreen;
++			_vitaPageY = yPositionOnScreen;
++			_vitaPageWidth = width;
++			_vitaPageHeight = height;
++		}
++		if (VitaPlatform.IsVita)
++		{
++			pages.Add(null);
++			_vitaPageFactories.Add(create);
++		}
++		else
++		{
++			pages.Add(create(_vitaPageX, _vitaPageY, _vitaPageWidth, _vitaPageHeight));
++			_vitaPageFactories.Add(null);
++		}
++	}
++
++	/// <summary>Port: builds the page of <paramref name="tab" /> if <see cref="VitaAddPage" /> left it for later.</summary>
++	private void VitaEnsurePage(int tab)
++	{
++		if (tab >= 0 && tab < pages.Count && pages[tab] == null && tab < _vitaPageFactories.Count && _vitaPageFactories[tab] != null)
++		{
++			pages[tab] = _vitaPageFactories[tab](_vitaPageX, _vitaPageY, _vitaPageWidth, _vitaPageHeight);
++			_vitaPageFactories[tab] = null;
++		}
++	}
++
+ 	public void AddTabsToClickableComponents(IClickableMenu menu)
+ 	{
+ 		menu.allClickableComponents.AddRange(tabs);
+@@ -240,7 +285,13 @@ public class GameMenu : IClickableMenu
+ 		switch (button)
+ 		{
+ 		case Buttons.RightTrigger:
+-			if (currentTab == mapTab)
++			if (currentTab == mapTab && VitaPlatform.IsVita)
++			{
++				// Port: the map page is left by changing tab like any other; building a whole new GameMenu
++				// (every page, the collections) stopped the Vita for ~170 ms per tab switch past the map.
++				changeTab(mapTab + 1);
++			}
++			else if (currentTab == mapTab)
+ 			{
+ 				Game1.activeClickableMenu = new GameMenu(mapTab + 1);
+ 				Game1.playSound("smallSelect");
+@@ -251,7 +302,13 @@ public class GameMenu : IClickableMenu
+ 			}
+ 			break;
+ 		case Buttons.LeftTrigger:
+-			if (currentTab == mapTab)
++			if (currentTab == mapTab && VitaPlatform.IsVita)
++			{
++				// Port: the map page is left by changing tab like any other; building a whole new GameMenu
++				// (every page, the collections) stopped the Vita for ~170 ms per tab switch past the map.
++				changeTab(mapTab - 1);
++			}
++			else if (currentTab == mapTab)
+ 			{
+ 				Game1.activeClickableMenu = new GameMenu(mapTab - 1);
+ 				Game1.playSound("smallSelect");
+@@ -427,6 +484,7 @@ public class GameMenu : IClickableMenu
+ 		{
+ 			Game1.playSound("smallSelect");
+ 		}
++		VitaEnsurePage(currentTab);
+ 		pages[currentTab].populateClickableComponentList();
+ 		AddTabsToClickableComponents(pages[currentTab]);
+ 		setTabNeighborsForCurrentPage();

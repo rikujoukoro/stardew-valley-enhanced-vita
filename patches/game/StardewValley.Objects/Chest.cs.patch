@@ -1,0 +1,13 @@
+diff --git a/StardewValley.Objects/Chest.cs b/StardewValley.Objects/Chest.cs
+index cc4632d23f61cdd889841ec89dda29d314bf8616..6a579d01ac232c9cacf3bd0b67b85378df67d6da 100644
+--- a/StardewValley.Objects/Chest.cs
++++ b/StardewValley.Objects/Chest.cs
+@@ -1053,7 +1053,7 @@ public class Chest : Object
+ 		mutex.Update(environment);
+ 		if (shakeTimer > 0)
+ 		{
+-			shakeTimer -= time.ElapsedGameTime.Milliseconds;
++			shakeTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 			if (shakeTimer <= 0)
+ 			{
+ 				health = 10;

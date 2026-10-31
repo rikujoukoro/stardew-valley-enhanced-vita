@@ -1,0 +1,100 @@
+diff --git a/StardewValley/FarmAnimal.cs b/StardewValley/FarmAnimal.cs
+index 7f342baaec2f270349c56c177231ee0535b88f20..28e900c6d216818b3d74545a6558437f4b4bc5c9 100644
+--- a/StardewValley/FarmAnimal.cs
++++ b/StardewValley/FarmAnimal.cs
+@@ -521,13 +521,30 @@ public class FarmAnimal : Character
+ 
+ 	public virtual FarmAnimalData GetAnimalData()
+ 	{
+-		if (!Game1.farmAnimalData.TryGetValue(type.Value, out var animalData))
++		// Port: asked many times per animal per tick; the string-keyed lookup only reruns when the
++		// type or the loaded data changes.
++		string id = type.Value;
++		IDictionary<string, FarmAnimalData> source = Game1.farmAnimalData;
++		if (id != null && (object)id == _animalDataId && source == _animalDataSource)
+ 		{
+-			return null;
++			return _animalData;
++		}
++		if (!source.TryGetValue(id, out var animalData))
++		{
++			animalData = null;
+ 		}
++		_animalDataId = id;
++		_animalDataSource = source;
++		_animalData = animalData;
+ 		return animalData;
+ 	}
+ 
++	private string _animalDataId;
++
++	private IDictionary<string, FarmAnimalData> _animalDataSource;
++
++	private FarmAnimalData _animalData;
++
+ 	public static string GetDisplayName(string id, bool forShop = false)
+ 	{
+ 		if (!Game1.farmAnimalData.TryGetValue(id, out var data))
+@@ -1349,10 +1366,12 @@ public class FarmAnimal : Character
+ 		}
+ 	}
+ 
++	private int _nextGrassPathfindTick;
++
+ 	public static bool grassEndPointFunction(PathNode currentPoint, Point endPoint, GameLocation location, Character c)
+ 	{
+-		Vector2 tileLocation = new Vector2(currentPoint.x, currentPoint.y);
+-		if (location.terrainFeatures.TryGetValue(tileLocation, out var t) && t is Grass grass)
++		TerrainFeature t = location.VitaFeatureAt(currentPoint.x, currentPoint.y);
++		if (t is Grass grass)
+ 		{
+ 			if (reservedGrass.Contains(t))
+ 			{
+@@ -1506,10 +1525,14 @@ public class FarmAnimal : Character
+ 		{
+ 			return true;
+ 		}
+-		if (!isSwimming.Value && location.IsOutdoors && fullness.Value < 195 && Game1.random.NextDouble() < 0.002 && NumPathfindingThisTick < MaxPathfindingPerTick)
++		if (!isSwimming.Value && location.IsOutdoors && fullness.Value < 195 && (!VitaPlatform.IsVita || ((Game1.ticks >= _nextGrassPathfindTick || _nextGrassPathfindTick - Game1.ticks > 600) && location.VitaHasGrass)) && Game1.random.NextDouble() < 0.002 && NumPathfindingThisTick < MaxPathfindingPerTick)
+ 		{
+ 			NumPathfindingThisTick++;
+ 			controller = new PathFindController(this, location, grassEndPointFunction, -1, behaviorAfterFindingGrassPatch, 200, Point.Zero);
++			if (VitaPlatform.IsVita && controller.pathToEndPoint == null)
++			{
++				_nextGrassPathfindTick = Game1.ticks + 600;
++			}
+ 			_followTarget = null;
+ 			_followTargetPosition = null;
+ 		}
+@@ -1774,7 +1797,7 @@ public class FarmAnimal : Character
+ 		}
+ 		if (hitGlowTimer > 0)
+ 		{
+-			hitGlowTimer -= time.ElapsedGameTime.Milliseconds;
++			hitGlowTimer -= StardewValley.Character.ElapsedMs(time);
+ 		}
+ 		if (sprite.CurrentAnimation != null)
+ 		{
+@@ -1828,11 +1851,11 @@ public class FarmAnimal : Character
+ 					}
+ 				}
+ 			}
+-			noWarpTimer = Math.Max(0, noWarpTimer - time.ElapsedGameTime.Milliseconds);
++			noWarpTimer = Math.Max(0, noWarpTimer - StardewValley.Character.ElapsedMs(time));
+ 		}
+ 		if (pauseTimer > 0)
+ 		{
+-			pauseTimer -= time.ElapsedGameTime.Milliseconds;
++			pauseTimer -= StardewValley.Character.ElapsedMs(time);
+ 		}
+ 		if (SleepIfNecessary())
+ 		{
+@@ -1854,7 +1877,7 @@ public class FarmAnimal : Character
+ 			}
+ 			if (uniqueFrameAccumulator != -1)
+ 			{
+-				uniqueFrameAccumulator += time.ElapsedGameTime.Milliseconds;
++				uniqueFrameAccumulator += StardewValley.Character.ElapsedMs(time);
+ 				if (uniqueFrameAccumulator > 500)
+ 				{
+ 					if (object.Equals(true, GetAnimalData()?.UseDoubleUniqueAnimationFrames))

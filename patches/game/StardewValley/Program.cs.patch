@@ -1,0 +1,68 @@
+diff --git a/StardewValley/Program.cs b/StardewValley/Program.cs
+index 584de6781e53af09538e2ae4db9fe739b551a3c8..73de5c2add8f0ee0f050f30dca25fb6d8f6411f4 100644
+--- a/StardewValley/Program.cs
++++ b/StardewValley/Program.cs
+@@ -5,7 +5,6 @@ using System.Text;
+ using System.Threading;
+ using StardewValley.Network.Compress;
+ using StardewValley.SDKs;
+-using StardewValley.SDKs.Steam;
+ 
+ namespace StardewValley;
+ 
+@@ -29,12 +28,17 @@ public static class Program
+ 
+ 	public static bool releaseBuild = true;
+ 
+-	public static bool enableCheats = !releaseBuild;
++	/// <summary>Enables the /debug chat command. Port development aid: also on with SV_DEVCHEATS=1.</summary>
++	public static bool enableCheats = !releaseBuild || Environment.GetEnvironmentVariable("SV_DEVCHEATS") == "1";
++
++	/// <summary>Port development aid: SV_LOGFILE=1 writes the game log to ErrorLogs/game-latest.txt (and, on the Vita, console output to ErrorLogs/console.txt).</summary>
++	public static bool logToFile = Environment.GetEnvironmentVariable("SV_LOGFILE") == "1";
+ 
+ 	public const int buildType = 0;
+ 
+ 	private static SDKHelper _sdk;
+ 
++	// Pure managed C# LZ4 compression: handles compressed network packets from PC hosts (and compresses outgoing).
+ 	internal static readonly INetCompression defaultCompression = new LZ4NetCompression();
+ 
+ 	internal static INetCompression netCompression = defaultCompression;
+@@ -51,13 +55,10 @@ public static class Program
+ 	{
+ 		get
+ 		{
++			// Single-player build: no Steam/Galaxy/Rail platform SDK. Achievements become Vita-style trophies (also on the PC, to test them).
+ 			if (_sdk == null)
+ 			{
+-				_sdk = new SteamHelper();
+-				if (_sdk == null)
+-				{
+-					_sdk = new NullSDKHelper();
+-				}
++				_sdk = new VitaSDKHelper();
+ 			}
+ 			return _sdk;
+ 		}
+@@ -67,9 +68,20 @@ public static class Program
+ 	{
+ 		Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+ 		GameTesterMode = true;
++		if (VitaPlatform.IsVita && logToFile)
++		{
++			// The Vita has no console: keep what FNA and the runtime print there (FNALoggerEXT's default).
++			// Written to ErrorLogs/console.txt by the launcher's own thread (VitaPlatform.ConsoleWriter).
++			GetLocalAppDataFolder("ErrorLogs");
++			TextWriter console = TextWriter.Synchronized(new VitaPlatform.ConsoleWriter());
++			Console.SetOut(console);
++			Console.SetError(console);
++		}
+ 		AppDomain.CurrentDomain.UnhandledException += handleException;
++		VitaPlatform.Trace("Main: creating GameRunner");
+ 		using GameRunner game = new GameRunner();
+ 		GameRunner.instance = game;
++		VitaPlatform.Trace("Main: running");
+ 		game.Run();
+ 	}
+ 

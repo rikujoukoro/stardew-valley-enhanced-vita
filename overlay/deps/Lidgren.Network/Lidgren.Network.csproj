@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Lidgren.Network</AssemblyName>
+    <NoWarn>$(NoWarn);CS3021</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+</Project>

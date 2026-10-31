@@ -1,0 +1,13 @@
+diff --git a/StardewValley.Events/QiPlaneEvent.cs b/StardewValley.Events/QiPlaneEvent.cs
+index c4b64a8e87632ce7efb143a5aa7aa7e6f5a259f7..62e1a663da766c8be98e6290fab0fe06f6fd05a9 100644
+--- a/StardewValley.Events/QiPlaneEvent.cs
++++ b/StardewValley.Events/QiPlaneEvent.cs
+@@ -34,7 +34,7 @@ public class QiPlaneEvent : BaseFarmEvent
+ 	{
+ 		b.Draw(Game1.staminaRect, new Rectangle(0, 0, Game1.graphics.GraphicsDevice.Viewport.Width, Game1.graphics.GraphicsDevice.Viewport.Height), new Rectangle(0, 0, 1, 1), new Color(24, 34, 84));
+ 		b.Draw(Game1.mouseCursors, new Rectangle(0, 0, Game1.graphics.GraphicsDevice.Viewport.Width, (int)((float)Game1.graphics.GraphicsDevice.Viewport.Height * 0.7f)), new Rectangle(639, 858, 1, 184), Color.LightBlue);
+-		b.Draw(Game1.mouseCursors, new Vector2(1f, 1f), new Rectangle(0, 1453, 639, 191), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 0.8f);
++		b.Draw(Game1.mouseCursors, new Vector2(0f, 0f), new Rectangle(0, 1453, 639, 191), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 0.8f);
+ 		b.Draw(Game1.mouseCursors, new Vector2(2564f, 1f), new Rectangle(0, 1453, 639, 191), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 0.8f);
+ 		b.Draw(Game1.mouseCursors, new Vector2(-50f, -10f) * 4f + new Vector2(0f, Game1.graphics.GraphicsDevice.Viewport.Height - 596), new Rectangle(0, 885, 639, 149), Color.DarkCyan, 0f, Vector2.Zero, 4f, SpriteEffects.None, 0.7f);
+ 		b.Draw(Game1.mouseCursors, new Vector2(-50f, -10f) * 4f + new Vector2(2556f, Game1.graphics.GraphicsDevice.Viewport.Height - 596), new Rectangle(0, 885, 639, 149), Color.DarkCyan, 0f, Vector2.Zero, 4f, SpriteEffects.None, 0.7f);

@@ -1,0 +1,171 @@
+diff --git a/src/Content/ContentManager.cs b/src/Content/ContentManager.cs
+index a07e13e6e7ec1088f680fea04cccce38f324567b..47ea8adf573a7d01a32a55a3e8da423d84e63a12 100644
+--- a/src/Content/ContentManager.cs
++++ b/src/Content/ContentManager.cs
+@@ -237,6 +237,75 @@ namespace Microsoft.Xna.Framework.Content
+ 			return result;
+ 		}
+ 
++		/* Vita port (Stardew Valley): drops the cached assets whose key matches. When dispose is true,
++		 * disposable assets (and a SpriteFont's texture) are disposed immediately so GPU/native memory is
++		 * freed right away; otherwise finalizers free what nothing references any more.
++		 */
++		public int VitaForgetAssets(Predicate<string> match, bool dispose = false)
++		{
++			List<string> keys = new List<string>();
++			foreach (KeyValuePair<string, object> pair in loadedAssets)
++			{
++				if (match(pair.Key))
++				{
++					keys.Add(pair.Key);
++				}
++			}
++			foreach (string key in keys)
++			{
++				VitaRemoveLoadedAsset(key, dispose);
++			}
++			return keys.Count;
++		}
++
++		public bool VitaForgetAsset(string assetName, bool dispose = false)
++		{
++			if (string.IsNullOrEmpty(assetName))
++			{
++				return false;
++			}
++			return VitaRemoveLoadedAsset(assetName.Replace('\\', '/'), dispose);
++		}
++
++		public bool VitaIsKeyLoaded(string key)
++		{
++			return key != null && loadedAssets.ContainsKey(key);
++		}
++
++		public List<string> VitaGetLoadedKeys()
++		{
++			return new List<string>(loadedAssets.Keys);
++		}
++
++		private bool VitaRemoveLoadedAsset(string key, bool dispose)
++		{
++			object asset;
++			if (!loadedAssets.TryGetValue(key, out asset))
++			{
++				return false;
++			}
++			loadedAssets.Remove(key);
++			IDisposable disposable = asset as IDisposable;
++			if (disposable != null)
++			{
++				disposableAssets.Remove(disposable);
++				if (dispose)
++				{
++					disposable.Dispose();
++				}
++			}
++			SpriteFont font = asset as SpriteFont;
++			if (font != null && font.textureValue != null)
++			{
++				disposableAssets.Remove(font.textureValue);
++				if (dispose)
++				{
++					font.textureValue.Dispose();
++				}
++			}
++			return true;
++		}
++
+ 		public virtual void Unload()
+ 		{
+ 			// Look for disposable assets.
+@@ -316,8 +385,8 @@ namespace Microsoft.Xna.Framework.Content
+ 				xnbHeader[2] == 'B' &&
+ 				targetPlatformIdentifiers.Contains((char) xnbHeader[3]) )
+ 			{
+-				using (BinaryReader xnbReader = new BinaryReader(stream))
+-				using (ContentReader reader = GetContentReaderFromXnb(assetName, ref stream, xnbReader, (char) xnbHeader[3], recordDisposableObject))
++				BinaryReader xnbReader = new BinaryReader(stream);
++				using (ContentReader reader = GetContentReaderFromXnb(assetName, ref stream, ref xnbReader, (char) xnbHeader[3], recordDisposableObject))
+ 				{
+ 					result = reader.ReadAsset<T>();
+ 					GraphicsResource resource = result as GraphicsResource;
+@@ -470,7 +539,10 @@ namespace Microsoft.Xna.Framework.Content
+ 
+ 		#region Private Methods
+ 
+-		private ContentReader GetContentReaderFromXnb(string originalAssetName, ref Stream stream, BinaryReader xnbReader, char platform, Action<IDisposable> recordDisposableObject)
++		[ThreadStatic]
++		private static LzxDecoder cachedLzx;
++
++		private ContentReader GetContentReaderFromXnb(string originalAssetName, ref Stream stream, ref BinaryReader xnbReader, char platform, Action<IDisposable> recordDisposableObject)
+ 		{
+ 			byte version = xnbReader.ReadByte();
+ 			byte flags = xnbReader.ReadByte();
+@@ -499,21 +571,41 @@ namespace Microsoft.Xna.Framework.Content
+ 					true // This MUST be true! Readers may need GetBuffer()!
+ 				);
+ 
+-				/* Read in the whole XNB file at once, into a temp buffer.
+-				 * For slow disks, the extra malloc is more than worth the
+-				 * performance improvement from not constantly fread()ing!
++				/* Port: when the stream is already a MemoryStream (VitaContentPack),
++				 * decompress directly from it instead of allocating a second copy.
+ 				 */
+-				MemoryStream compressedStream = new MemoryStream(
+-					new byte[compressedSize],
+-					0,
+-					compressedSize,
+-					true,
+-					true
+-				);
+-				stream.Read(compressedStream.GetBuffer(), 0, compressedSize);
++				Stream compressedStream;
++				long compressedOrigin;
++				if (stream is MemoryStream)
++				{
++					compressedStream = stream;
++					compressedOrigin = stream.Position;
++				}
++				else
++				{
++					MemoryStream tempStream = new MemoryStream(
++						new byte[compressedSize],
++						0,
++						compressedSize,
++						true,
++						true
++					);
++					stream.Read(tempStream.GetBuffer(), 0, compressedSize);
++					compressedStream = tempStream;
++					compressedOrigin = 0;
++				}
+ 
+ 				// Default window size for XNB encoded files is 64Kb (need 16 bits to represent it)
+-				LzxDecoder dec = new LzxDecoder(16);
++				// Port: reuse one decoder per thread (Reset() == fresh constructor state).
++				LzxDecoder dec = cachedLzx;
++				if (dec == null)
++				{
++					dec = cachedLzx = new LzxDecoder(16);
++				}
++				else
++				{
++					dec.Reset();
++				}
+ 				int decodedBytes = 0;
+ 				long pos = 0;
+ 
+@@ -558,8 +650,12 @@ namespace Microsoft.Xna.Framework.Content
+ 					/* Reset the position of the input just in case the bit
+ 					 * buffer read in some unused bytes.
+ 					 */
+-					compressedStream.Seek(pos, SeekOrigin.Begin);
++					compressedStream.Seek(compressedOrigin + pos, SeekOrigin.Begin);
+ 				}
++				xnbReader.Close();
++				xnbReader = null;
++				stream = null;
++				compressedStream = null;
+ 				if (decompressedStream.Position != decompressedSize)
+ 				{
+ 					throw new ContentLoadException(

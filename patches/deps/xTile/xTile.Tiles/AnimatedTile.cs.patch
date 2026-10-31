@@ -1,0 +1,22 @@
+diff --git a/xTile.Tiles/AnimatedTile.cs b/xTile.Tiles/AnimatedTile.cs
+index a0d595457eb70e9ce93fdbd80920f4a5aa9a43a7..908b380bdecbe579b1fd43d7e9e72f271234caf8 100644
+--- a/xTile.Tiles/AnimatedTile.cs
++++ b/xTile.Tiles/AnimatedTile.cs
+@@ -54,6 +54,17 @@ public class AnimatedTile : Tile
+ 		}
+ 	}
+ 
++	/// <summary>Port: the frame that <see cref="TileSheet" />, <see cref="TileIndex" /> and <see cref="BlendMode" /> each resolve to right now, found once (each of those redoes a 64-bit modulo and division).</summary>
++	public StaticTile CurrentFrame
++	{
++		get
++		{
++			long num = Layer.Map.ElapsedTime % m_animationInterval;
++			int num2 = (int)(num / m_frameInterval);
++			return m_tileFrames[num2];
++		}
++	}
++
+ 	public StaticTile[] TileFrames
+ 	{
+ 		get

@@ -1,0 +1,38 @@
+diff --git a/StardewValley.Mods/ModHooks.cs b/StardewValley.Mods/ModHooks.cs
+index 107b7840e28b13323122b9216015ff75bac6f7a4..fc9ae0bbdbb45290e104d564a018bb4a933b457e 100644
+--- a/StardewValley.Mods/ModHooks.cs
++++ b/StardewValley.Mods/ModHooks.cs
+@@ -75,13 +75,31 @@ public class ModHooks
+ 
+ 	public virtual Task StartTask(Task task, string id)
+ 	{
+-		task.Start();
++		StartOrRun(task);
+ 		return task;
+ 	}
+ 
+ 	public virtual Task<T> StartTask<T>(Task<T> task, string id)
+ 	{
+-		task.Start();
++		StartOrRun(task);
+ 		return task;
+ 	}
++
++	/// <summary>Port: on the Vita the game's background tasks (load, save, new day) run on the calling thread.</summary>
++	/// <remarks>
++	/// Saving on a thread-pool thread ended in a fatal assertion in Mono's cooperative GC suspend
++	/// (a thread counted as stopped was already running at resume). The four Vita cores gain little from
++	/// it anyway, and every extra thread costs a stack. The callers only poll IsCompleted.
++	/// </remarks>
++	private static void StartOrRun(Task task)
++	{
++		if (VitaPlatform.IsVita)
++		{
++			task.RunSynchronously();
++		}
++		else
++		{
++			task.Start();
++		}
++	}
+ }

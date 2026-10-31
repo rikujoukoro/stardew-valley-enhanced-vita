@@ -1,0 +1,257 @@
+diff --git a/StardewValley/Character.cs b/StardewValley/Character.cs
+index 2b3db9c8905350ef08eefd5232aaf66139f9766a..47d095381622b35253f57731bc0c5b9d128d6037 100644
+--- a/StardewValley/Character.cs
++++ b/StardewValley/Character.cs
+@@ -394,6 +394,25 @@ public class Character : INetObject<NetFields>, IHaveModData
+ 		}
+ 	}
+ 
++	private string _cachedNameForNpcCheck;
++
++	private bool _cachedNameContainsNpc;
++
++	[XmlIgnore]
++	internal bool NameContainsNPC
++	{
++		get
++		{
++			string n = name.Value;
++			if (!object.ReferenceEquals(n, _cachedNameForNpcCheck))
++			{
++				_cachedNameForNpcCheck = n;
++				_cachedNameContainsNpc = n != null && n.Contains("NPC");
++			}
++			return _cachedNameContainsNpc;
++		}
++	}
++
+ 	[XmlIgnore]
+ 	public string Name
+ 	{
+@@ -795,6 +814,26 @@ public class Character : INetObject<NetFields>, IHaveModData
+ 		yVelocity = (int)(yVelocity - yVelocity / 2f);
+ 	}
+ 
++	/// <summary>Port: whether <paramref name="location" /> is a location nobody sees: alone, the player is somewhere else (with other farmers, any of them might be there or viewing it).</summary>
++	internal static bool IsVitaUnobserved(GameLocation location)
++	{
++		GameLocation here = Game1.currentLocation;
++		return location != null && here != null && !ReferenceEquals(location, here) && Game1.otherFarmers.Count == 0;
++	}
++
++	/// <summary>Port: whether a step of this character in <paramref name="location" /> (where nobody is: <see cref="IsVitaUnobserved" />) can use <see cref="GameLocation.IsUnobservedStepColliding" />: an NPC walking its schedule path, which the pathfinding test laid around the location's static blockers, that neither collides with other characters nor has collision rules of its own, in a location without animals, outside events.</summary>
++	internal bool IsVitaUnobservedScheduleWalker(GameLocation location)
++	{
++		PathFindController path = controller;
++		return this is NPC && path != null && path.NPCSchedule && !collidesWithOtherCharacters.Value && !hasSpecialCollisionRules() && location.animals.Length == 0 && !Game1.eventUp;
++	}
++
++	/// <summary>Port: the collision test of one step, vanilla's unless <paramref name="lean" /> (<see cref="IsVitaUnobservedScheduleWalker" />).</summary>
++	private bool IsStepColliding(GameLocation location, Microsoft.Xna.Framework.Rectangle next, xTile.Dimensions.Rectangle viewport, bool lean)
++	{
++		return lean ? location.IsUnobservedStepColliding(next, viewport, this) : location.isCollidingPosition(next, viewport, isFarmer: false, 0, glider: false, this);
++	}
++
+ 	public virtual void MovePosition(GameTime time, xTile.Dimensions.Rectangle viewport, GameLocation currentLocation)
+ 	{
+ 		if (this is FarmAnimal)
+@@ -812,18 +851,25 @@ public class Character : INetObject<NetFields>, IHaveModData
+ 			num = 0;
+ 		}
+ 		bool shouldDestroyUnderfootObjects = (byte)num != 0;
++		// Port: nobody sees a character walking in another location, so its walk animation (frames and an
++		// on-screen check every step) waits until someone is there; facing still turns, paths read it.
++		bool unobserved = VitaPlatform.IsVita && IsVitaUnobserved(currentLocation);
++		bool leanCollision = unobserved && IsVitaUnobservedScheduleWalker(currentLocation);
+ 		if (xVelocity != 0f || yVelocity != 0f)
+ 		{
+ 			applyVelocity(currentLocation);
+ 		}
+ 		else if (moveUp)
+ 		{
+-			if (currentLocation == null || !currentLocation.isCollidingPosition(nextPosition(0), viewport, isFarmer: false, 0, glider: false, this) || isCharging)
++			if (currentLocation == null || !IsStepColliding(currentLocation, nextPosition(0), viewport, leanCollision) || isCharging)
+ 			{
+ 				position.Y -= (float)speed + addedSpeed;
+ 				if (!ignoreMovementAnimation)
+ 				{
+-					Sprite.AnimateUp(time, (speed - 2 + (int)addedSpeed) * -25, Utility.isOnScreen(TilePoint, 1, currentLocation) ? "Cowboy_Footstep" : "");
++					if (!unobserved)
++					{
++						Sprite.AnimateUp(time, (speed - 2 + (int)addedSpeed) * -25, (Game1.currentMinigame != null && Utility.isOnScreen(TilePoint, 1, currentLocation)) ? "Cowboy_Footstep" : "");
++					}
+ 					faceDirection(0);
+ 				}
+ 			}
+@@ -840,18 +886,21 @@ public class Character : INetObject<NetFields>, IHaveModData
+ 				}
+ 				else
+ 				{
+-					blockedInterval += time.ElapsedGameTime.Milliseconds;
++					blockedInterval += StardewValley.Character.ElapsedMs(time);
+ 				}
+ 			}
+ 		}
+ 		else if (moveRight)
+ 		{
+-			if (currentLocation == null || !currentLocation.isCollidingPosition(nextPosition(1), viewport, isFarmer: false, 0, glider: false, this) || isCharging)
++			if (currentLocation == null || !IsStepColliding(currentLocation, nextPosition(1), viewport, leanCollision) || isCharging)
+ 			{
+ 				position.X += (float)speed + addedSpeed;
+ 				if (!ignoreMovementAnimation)
+ 				{
+-					Sprite.AnimateRight(time, (speed - 2 + (int)addedSpeed) * -25, Utility.isOnScreen(TilePoint, 1, currentLocation) ? "Cowboy_Footstep" : "");
++					if (!unobserved)
++					{
++						Sprite.AnimateRight(time, (speed - 2 + (int)addedSpeed) * -25, (Game1.currentMinigame != null && Utility.isOnScreen(TilePoint, 1, currentLocation)) ? "Cowboy_Footstep" : "");
++					}
+ 					faceDirection(1);
+ 				}
+ 			}
+@@ -868,18 +917,21 @@ public class Character : INetObject<NetFields>, IHaveModData
+ 				}
+ 				else
+ 				{
+-					blockedInterval += time.ElapsedGameTime.Milliseconds;
++					blockedInterval += StardewValley.Character.ElapsedMs(time);
+ 				}
+ 			}
+ 		}
+ 		else if (moveDown)
+ 		{
+-			if (currentLocation == null || !currentLocation.isCollidingPosition(nextPosition(2), viewport, isFarmer: false, 0, glider: false, this) || isCharging)
++			if (currentLocation == null || !IsStepColliding(currentLocation, nextPosition(2), viewport, leanCollision) || isCharging)
+ 			{
+ 				position.Y += (float)speed + addedSpeed;
+ 				if (!ignoreMovementAnimation)
+ 				{
+-					Sprite.AnimateDown(time, (speed - 2 + (int)addedSpeed) * -25, Utility.isOnScreen(TilePoint, 1, currentLocation) ? "Cowboy_Footstep" : "");
++					if (!unobserved)
++					{
++						Sprite.AnimateDown(time, (speed - 2 + (int)addedSpeed) * -25, (Game1.currentMinigame != null && Utility.isOnScreen(TilePoint, 1, currentLocation)) ? "Cowboy_Footstep" : "");
++					}
+ 					faceDirection(2);
+ 				}
+ 			}
+@@ -896,18 +948,21 @@ public class Character : INetObject<NetFields>, IHaveModData
+ 				}
+ 				else
+ 				{
+-					blockedInterval += time.ElapsedGameTime.Milliseconds;
++					blockedInterval += StardewValley.Character.ElapsedMs(time);
+ 				}
+ 			}
+ 		}
+ 		else if (moveLeft)
+ 		{
+-			if (currentLocation == null || !currentLocation.isCollidingPosition(nextPosition(3), viewport, isFarmer: false, 0, glider: false, this) || isCharging)
++			if (currentLocation == null || !IsStepColliding(currentLocation, nextPosition(3), viewport, leanCollision) || isCharging)
+ 			{
+ 				position.X -= (float)speed + addedSpeed;
+ 				if (!ignoreMovementAnimation)
+ 				{
+-					Sprite.AnimateLeft(time, (speed - 2 + (int)addedSpeed) * -25, Utility.isOnScreen(TilePoint, 1, currentLocation) ? "Cowboy_Footstep" : "");
++					if (!unobserved)
++					{
++						Sprite.AnimateLeft(time, (speed - 2 + (int)addedSpeed) * -25, (Game1.currentMinigame != null && Utility.isOnScreen(TilePoint, 1, currentLocation)) ? "Cowboy_Footstep" : "");
++					}
+ 					faceDirection(3);
+ 				}
+ 			}
+@@ -924,7 +979,7 @@ public class Character : INetObject<NetFields>, IHaveModData
+ 				}
+ 				else
+ 				{
+-					blockedInterval += time.ElapsedGameTime.Milliseconds;
++					blockedInterval += StardewValley.Character.ElapsedMs(time);
+ 				}
+ 			}
+ 		}
+@@ -1061,13 +1116,50 @@ public class Character : INetObject<NetFields>, IHaveModData
+ 		this.emoteYOffset = emoteYOffset;
+ 	}
+ 
++	// Port: TimeSpan.Milliseconds is a 64-bit divide + remainder (__emul_ldiv/lrem on the Vita's ARM, no hardware divide) and
++	// every NPC/animal/pet read it each tick. The step is the same every tick, so the result is kept per Ticks value.
++	private static long _elapsedMsTicks = -1L;
++
++	private static int _elapsedMs;
++
++	private static float _elapsedTotalMsF;
++
++	private static float _elapsedTotalSecF;
++
++	public static int ElapsedMs(GameTime time)
++	{
++		long ticks = time.ElapsedGameTime.Ticks;
++		if (ticks != _elapsedMsTicks)
++		{
++			_elapsedMs = time.ElapsedGameTime.Milliseconds;
++			_elapsedTotalMsF = (float)time.ElapsedGameTime.TotalMilliseconds;
++			_elapsedTotalSecF = (float)time.ElapsedGameTime.TotalSeconds;
++			_elapsedMsTicks = ticks;
++		}
++		return _elapsedMs;
++	}
++
++	// Port: (float)ElapsedGameTime.TotalMilliseconds, cached per step like ElapsedMs (a long->double convert plus a double divide each call).
++	public static float ElapsedTotalMsF(GameTime time)
++	{
++		ElapsedMs(time);
++		return _elapsedTotalMsF;
++	}
++
++	// Port: (float)ElapsedGameTime.TotalSeconds, cached per step.
++	public static float ElapsedTotalSecF(GameTime time)
++	{
++		ElapsedMs(time);
++		return _elapsedTotalSecF;
++	}
++
+ 	public void updateEmote(GameTime time)
+ 	{
+ 		if (!isEmoting)
+ 		{
+ 			return;
+ 		}
+-		emoteInterval += time.ElapsedGameTime.Milliseconds;
++		emoteInterval += StardewValley.Character.ElapsedMs(time);
+ 		if (emoteFading && emoteInterval > 20f)
+ 		{
+ 			emoteInterval = 0f;
+@@ -1478,7 +1570,7 @@ public class Character : INetObject<NetFields>, IHaveModData
+ 		}
+ 		if (forceUpdateTimer > 0)
+ 		{
+-			forceUpdateTimer -= time.ElapsedGameTime.Milliseconds;
++			forceUpdateTimer -= StardewValley.Character.ElapsedMs(time);
+ 		}
+ 		updateGlow();
+ 		updateEmote(time);
+@@ -1501,9 +1593,15 @@ public class Character : INetObject<NetFields>, IHaveModData
+ 			{
+ 				updateMovement(location, time);
+ 			}
+-			if (controller != null && !freezeMotion && controller.update(time))
++			if (controller != null && !freezeMotion)
+ 			{
+-				controller = null;
++				long pathStart = VitaPlatform.BeginHotSection();
++				bool reachedEnd = controller.update(time);
++				VitaPlatform.EndHotSection(VitaPlatform.HotSection.NpcPath, pathStart);
++				if (reachedEnd)
++				{
++					controller = null;
++				}
+ 			}
+ 		}
+ 		else
+@@ -1517,7 +1615,7 @@ public class Character : INetObject<NetFields>, IHaveModData
+ 	{
+ 		if (faceTowardFarmerTimer > 0)
+ 		{
+-			faceTowardFarmerTimer -= time.ElapsedGameTime.Milliseconds;
++			faceTowardFarmerTimer -= StardewValley.Character.ElapsedMs(time);
+ 			if (whoToFace.Value != null)
+ 			{
+ 				Vector2 tile = Tile;

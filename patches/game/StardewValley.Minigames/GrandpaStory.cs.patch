@@ -1,0 +1,221 @@
+diff --git a/StardewValley.Minigames/GrandpaStory.cs b/StardewValley.Minigames/GrandpaStory.cs
+index edef36c63ed5da0927aa15528ec57b2d3c001ad5..a7ddf2f9849f42537ae1bf42fdfab23a5a08b51b 100644
+--- a/StardewValley.Minigames/GrandpaStory.cs
++++ b/StardewValley.Minigames/GrandpaStory.cs
+@@ -64,6 +64,8 @@ public class GrandpaStory : IMinigame
+ 
+ 	private bool clickedLetter;
+ 
++	private int _lastLogSlot = -1;
++
+ 	private bool quit;
+ 
+ 	private bool fadingToQuit;
+@@ -89,7 +91,7 @@ public class GrandpaStory : IMinigame
+ 		grandpaSpeech.Enqueue(Game1.content.LoadString("Strings\\StringsFromCSFiles:GrandpaStory.cs.12035"));
+ 		grandpaSpeech.Enqueue(Game1.player.IsMale ? Game1.content.LoadString("Strings\\StringsFromCSFiles:GrandpaStory.cs.12036") : Game1.content.LoadString("Strings\\StringsFromCSFiles:GrandpaStory.cs.12038"));
+ 		grandpaSpeech.Enqueue(Game1.content.LoadString("Strings\\StringsFromCSFiles:GrandpaStory.cs.12040"));
+-		Game1.player.Position = new Vector2(panX, Game1.graphics.GraphicsDevice.Viewport.Height / 2 - 360) + new Vector2(3000f, 376f);
++		Game1.player.Position = new Vector2(panX, (float)sceneHeight / 2f - 360f) + new Vector2(3000f, 376f);
+ 		Game1.viewport.X = 0;
+ 		Game1.viewport.Y = 0;
+ 		Game1.currentLocation = new GameLocation("Maps\\FarmHouse", "Temp");
+@@ -166,13 +168,13 @@ public class GrandpaStory : IMinigame
+ 				letterDy = -0.6f;
+ 				letterDyDy = 0.001f;
+ 			}
+-			if (letterReceived && letterPosition.Y <= (float)Game1.viewport.Height)
++			if (letterReceived && letterPosition.Y <= (float)sceneHeight)
+ 			{
+ 				letterDy += letterDyDy * (float)time.ElapsedGameTime.Milliseconds;
+ 				letterPosition.Y += letterDy * (float)time.ElapsedGameTime.Milliseconds;
+ 				letterPosition.X += 0.01f * (float)time.ElapsedGameTime.Milliseconds;
+ 				letterScale += 0.00125f * (float)time.ElapsedGameTime.Milliseconds;
+-				if (letterPosition.Y > (float)Game1.viewport.Height)
++				if (letterPosition.Y > (float)sceneHeight)
+ 				{
+ 					Game1.playSound("coin");
+ 				}
+@@ -204,16 +206,16 @@ public class GrandpaStory : IMinigame
+ 				Game1.viewport.X = 0;
+ 				Game1.viewport.Y = 0;
+ 				panX -= 0.2f * (float)time.ElapsedGameTime.Milliseconds;
+-				Game1.player.Position = new Vector2(panX, Game1.graphics.GraphicsDevice.Viewport.Height / 2 - 360) + new Vector2(3612f, 572f);
++				Game1.player.Position = new Vector2(panX, (float)sceneHeight / 2f - 360f) + new Vector2(3612f, 572f);
+ 			}
+ 			break;
+ 		case 5:
+-			if (panX > (float)(-4800 + Math.Max(1600, Game1.viewport.Width)))
++			if (panX > (float)(-4800 + Math.Max(1600, sceneWidth)))
+ 			{
+ 				Game1.viewport.X = 0;
+ 				Game1.viewport.Y = 0;
+ 				panX -= 0.2f * (float)time.ElapsedGameTime.Milliseconds;
+-				Game1.player.Position = new Vector2(panX, (float)Game1.graphics.GraphicsDevice.Viewport.Height / Game1.options.zoomLevel / 2f - 360f) + new Vector2(3612f, 572f);
++				Game1.player.Position = new Vector2(panX, (float)sceneHeight / 2f - 360f) + new Vector2(3612f, 572f);
+ 				break;
+ 			}
+ 			grandpaSpeechTimer += time.ElapsedGameTime.Milliseconds;
+@@ -253,7 +255,7 @@ public class GrandpaStory : IMinigame
+ 				scene = 6;
+ 				grandpaSpeechTimer = 0;
+ 			}
+-			Game1.player.Position = new Vector2(panX, (float)Game1.graphics.GraphicsDevice.Viewport.Height / Game1.options.zoomLevel / 2f - 360f) + new Vector2(3612f, 572f);
++			Game1.player.Position = new Vector2(panX, (float)sceneHeight / 2f - 360f) + new Vector2(3612f, 572f);
+ 			break;
+ 		case 6:
+ 			grandpaSpeechTimer += time.ElapsedGameTime.Milliseconds;
+@@ -299,7 +301,12 @@ public class GrandpaStory : IMinigame
+ 
+ 	private Rectangle clickableGrandpaLetterRect()
+ 	{
+-		return new Rectangle((int)Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730).X + (286 - parallaxPan) * 4, (int)Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730).Y + 218 + Math.Max(0, Math.Min(60, (grandpaSpeechTimer - 5000) / 8)), 524, 344);
++		Vector2 origin = new Vector2((float)(sceneWidth - 1281) / 2f, (float)(sceneHeight - 720) / 2f);
++		float sx = (float)Game1.graphics.GraphicsDevice.Viewport.Width / (float)sceneWidth;
++		float sy = (float)Game1.graphics.GraphicsDevice.Viewport.Height / (float)sceneHeight;
++		int x = (int)((origin.X + (float)(286 - parallaxPan) * 4f) * sx);
++		int y = (int)((origin.Y + 218f + (float)Math.Max(0, Math.Min(60, (grandpaSpeechTimer - 5000) / 8))) * sy);
++		return new Rectangle(x, y, (int)(524f * sx), (int)(344f * sy));
+ 	}
+ 
+ 	public void receiveLeftClick(int x, int y, bool playSound = true)
+@@ -384,17 +391,24 @@ public class GrandpaStory : IMinigame
+ 
+ 	public void draw(SpriteBatch b)
+ 	{
+-		b.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+-		b.Draw(Game1.staminaRect, new Rectangle(0, 0, Game1.viewport.Width, Game1.viewport.Height), new Color(64, 136, 248));
+-		b.Draw(Game1.staminaRect, new Rectangle(0, 0, Game1.viewport.Width, Game1.viewport.Height), Color.Black * backgroundFade);
++		if (VitaPlatform.IsVita && totalMilliseconds / 2000 != _lastLogSlot)
++		{
++			_lastLogSlot = totalMilliseconds / 2000;
++			VitaPlatform.Trace("grandpa draw: device viewport " + Game1.graphics.GraphicsDevice.Viewport.Width + "x" + Game1.graphics.GraphicsDevice.Viewport.Height + ", Game1.viewport " + Game1.viewport.Width + "x" + Game1.viewport.Height + ", back buffer scale " + Game1.graphics.GraphicsDevice.VitaBackBufferScale + ", zoom " + Game1.options.zoomLevel + ", back buffer " + Game1.graphics.GraphicsDevice.PresentationParameters.BackBufferWidth + "x" + Game1.graphics.GraphicsDevice.PresentationParameters.BackBufferHeight);
++		}
++		Matrix scaleMatrix = Matrix.CreateScale((float)Game1.graphics.GraphicsDevice.Viewport.Width / (float)sceneWidth, (float)Game1.graphics.GraphicsDevice.Viewport.Height / (float)sceneHeight, 1f);
++		b.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null, null, scaleMatrix);
++		b.Draw(Game1.staminaRect, new Rectangle(0, 0, sceneWidth, sceneHeight), new Color(64, 136, 248));
++		b.Draw(Game1.staminaRect, new Rectangle(0, 0, sceneWidth, sceneHeight), Color.Black * backgroundFade);
++		Vector2 origin = new Vector2((float)(sceneWidth - 1281) / 2f, (float)(sceneHeight - 720) / 2f);
+ 		if (drawGrandpa)
+ 		{
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730), new Rectangle(427, (totalMilliseconds % 300 < 150) ? 240 : 0, 427, 240), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(317f, 74f) * 3f, new Rectangle(427 + 74 * (totalMilliseconds % 400 / 100), 480, 74, 42), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(320f, 75f) * 3f, new Rectangle(427, 522, 70, 32), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin, new Rectangle(427, (totalMilliseconds % 300 < 150) ? 240 : 0, 427, 240), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin + new Vector2(317f, 74f) * 3f, new Rectangle(427 + 74 * (totalMilliseconds % 400 / 100), 480, 74, 42), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin + new Vector2(320f, 75f) * 3f, new Rectangle(427, 522, 70, 32), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+ 			if (grandpaSpeechTimer > 8000 && grandpaSpeechTimer % 10000 < 5000)
+ 			{
+-				b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(189f, 69f) * 3f, new Rectangle(497 + 18 * (totalMilliseconds % 400 / 200), 523, 18, 18), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++				b.Draw(texture, origin + new Vector2(189f, 69f) * 3f, new Rectangle(497 + 18 * (totalMilliseconds % 400 / 200), 523, 18, 18), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+ 			}
+ 			if (grandpaSpeech.Count > 0 && grandpaSpeechTimer > 3000)
+ 			{
+@@ -403,7 +417,7 @@ public class GrandpaStory : IMinigame
+ 				Vector2 textSize = Game1.dialogueFont.MeasureString(text);
+ 				textSize *= textScale;
+ 				float shadowOffsetX = 3f * textScale;
+-				Vector2 textPos = new Vector2((float)(Game1.viewport.Width / 2) - textSize.X / 2f, (float)((int)Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730).Y + 669) + 3f);
++				Vector2 textPos = new Vector2((float)(sceneWidth / 2) - textSize.X / 2f, (float)((int)origin.Y + 669) + 3f);
+ 				textPos.X -= shadowOffsetX;
+ 				b.DrawString(Game1.dialogueFont, text, textPos, Color.White * 0.25f, 0f, Vector2.Zero, textScale, SpriteEffects.None, 1f);
+ 				textPos.X += shadowOffsetX;
+@@ -411,51 +425,52 @@ public class GrandpaStory : IMinigame
+ 			}
+ 			if (letterReceived)
+ 			{
+-				b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(157f, 113f) * 3f, new Rectangle(463, 556, 37, 17), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++				b.Draw(texture, origin + new Vector2(157f, 113f) * 3f, new Rectangle(463, 556, 37, 17), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+ 				if (grandpaSpeechTimer > 8000 && grandpaSpeechTimer % 10000 > 7000 && grandpaSpeechTimer % 10000 < 9000 && totalMilliseconds % 600 < 300)
+ 				{
+-					b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(157f, 113f) * 3f, new Rectangle(500, 556, 37, 17), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++					b.Draw(texture, origin + new Vector2(157f, 113f) * 3f, new Rectangle(500, 556, 37, 17), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+ 				}
+-				b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + letterPosition, new Rectangle(729, 524, 131, 63), Color.White, 0f, Vector2.Zero, letterScale, SpriteEffects.None, 1f);
++				b.Draw(texture, origin + letterPosition, new Rectangle(729, 524, 131, 63), Color.White, 0f, Vector2.Zero, letterScale, SpriteEffects.None, 1f);
+ 			}
+ 		}
+ 		else if (scene == 3)
+ 		{
+-			SpriteText.drawString(b, Game1.content.LoadString("Strings\\StringsFromCSFiles:GrandpaStory.cs.12059"), (int)Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 0, 0, -200).X, (int)Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 0, 0, 0, -50).Y, 999, -1, 999, 1f, 1f, junimoText: false, -1, "", SpriteText.color_White);
++			SpriteText.drawString(b, Game1.content.LoadString("Strings\\StringsFromCSFiles:GrandpaStory.cs.12059"), (int)(sceneWidth / 2 - 200), (int)(sceneHeight / 2 - 50), 999, -1, 999, 1f, 1f, junimoText: false, -1, "", SpriteText.color_White);
+ 		}
+ 		else if (scene == 4)
+ 		{
+ 			float alpha = 1f - ((float)grandpaSpeechTimer - 7000f) / 2000f;
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730), new Rectangle(0, 0, 427, 240), Color.White * alpha, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(22f, 211f) * 3f, new Rectangle(264 + totalMilliseconds % 500 / 250 * 19, 581, 19, 17), Color.White * alpha, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(332f, 215f) * 3f, new Rectangle(305 + totalMilliseconds % 600 / 200 * 12, 581, 12, 12), Color.White * alpha, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(414f, 211f) * 3f, new Rectangle(460 + totalMilliseconds % 400 / 200 * 13, 581, 13, 17), Color.White * alpha, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(189f, 81f) * 3f, new Rectangle(426 + totalMilliseconds % 800 / 400 * 16, 581, 16, 16), Color.White * alpha, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin, new Rectangle(0, 0, 427, 240), Color.White * alpha, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin + new Vector2(22f, 211f) * 3f, new Rectangle(264 + totalMilliseconds % 500 / 250 * 19, 581, 19, 17), Color.White * alpha, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin + new Vector2(332f, 215f) * 3f, new Rectangle(305 + totalMilliseconds % 600 / 200 * 12, 581, 12, 12), Color.White * alpha, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin + new Vector2(414f, 211f) * 3f, new Rectangle(460 + totalMilliseconds % 400 / 200 * 13, 581, 13, 17), Color.White * alpha, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin + new Vector2(189f, 81f) * 3f, new Rectangle(426 + totalMilliseconds % 800 / 400 * 16, 581, 16, 16), Color.White * alpha, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+ 		}
+ 		if ((scene == 4 && grandpaSpeechTimer >= 5000) || scene == 5)
+ 		{
+-			b.Draw(texture, new Vector2(panX, Game1.viewport.Height / 2 - 360), new Rectangle(0, 600, 1200, 180), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+-			b.Draw(texture, new Vector2(panX, Game1.viewport.Height / 2 - 360) + new Vector2(1080f, 524f), new Rectangle(350 + totalMilliseconds % 800 / 400 * 14, 581, 14, 9), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+-			b.Draw(texture, new Vector2(panX, Game1.viewport.Height / 2 - 360) + new Vector2(1564f, 520f), new Rectangle(383 + totalMilliseconds % 400 / 200 * 9, 581, 9, 7), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+-			b.Draw(texture, new Vector2(panX, Game1.viewport.Height / 2 - 360) + new Vector2(2632f, 520f), new Rectangle(403 + totalMilliseconds % 600 / 300 * 8, 582, 8, 8), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+-			b.Draw(texture, new Vector2(panX, Game1.viewport.Height / 2 - 360) + new Vector2(2604f, 504f), new Rectangle(364 + totalMilliseconds % 1100 / 100 * 5, 594, 5, 3), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+-			b.Draw(texture, new Vector2(panX, Game1.viewport.Height / 2 - 360) + new Vector2(3116f, 492f), new Rectangle(343 + totalMilliseconds % 3000 / 1000 * 6, 593, 6, 5), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			float panY = (float)sceneHeight / 2f - 360f;
++			b.Draw(texture, new Vector2(panX, panY), new Rectangle(0, 600, 1200, 180), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			b.Draw(texture, new Vector2(panX, panY) + new Vector2(1080f, 524f), new Rectangle(350 + totalMilliseconds % 800 / 400 * 14, 581, 14, 9), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			b.Draw(texture, new Vector2(panX, panY) + new Vector2(1564f, 520f), new Rectangle(383 + totalMilliseconds % 400 / 200 * 9, 581, 9, 7), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			b.Draw(texture, new Vector2(panX, panY) + new Vector2(2632f, 520f), new Rectangle(403 + totalMilliseconds % 600 / 300 * 8, 582, 8, 8), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			b.Draw(texture, new Vector2(panX, panY) + new Vector2(2604f, 504f), new Rectangle(364 + totalMilliseconds % 1100 / 100 * 5, 594, 5, 3), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			b.Draw(texture, new Vector2(panX, panY) + new Vector2(3116f, 492f), new Rectangle(343 + totalMilliseconds % 3000 / 1000 * 6, 593, 6, 5), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+ 			if (scene == 5)
+ 			{
+ 				Game1.player.draw(b);
+ 			}
+-			b.Draw(texture, new Vector2(panX, Game1.viewport.Height / 2 - 360) + new Vector2(3580f, 540f), new Rectangle(895, 735, 29, 36), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			b.Draw(texture, new Vector2(panX, panY) + new Vector2(3580f, 540f), new Rectangle(895, 735, 29, 36), Color.White * ((scene == 5) ? 1f : (((float)grandpaSpeechTimer - 7000f) / 2000f)), 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+ 		}
+ 		if (scene == 6)
+ 		{
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(261 - parallaxPan, 145f) * 4f, new Rectangle(550, 540, 56 + parallaxPan, 35), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(261 - parallaxPan, 4f + (float)Math.Max(0, Math.Min(60, (grandpaSpeechTimer - 5000) / 8))) * 4f, new Rectangle(264, 434, 56 + parallaxPan, 141), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin + new Vector2(261 - parallaxPan, 145f) * 4f, new Rectangle(550, 540, 56 + parallaxPan, 35), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin + new Vector2(261 - parallaxPan, 4f + (float)Math.Max(0, Math.Min(60, (grandpaSpeechTimer - 5000) / 8))) * 4f, new Rectangle(264, 434, 56 + parallaxPan, 141), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+ 			if (grandpaSpeechTimer > 3000)
+ 			{
+-				b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(286 - parallaxPan, 32f + (float)Math.Max(0, Math.Min(60, (grandpaSpeechTimer - 5000) / 8)) + Math.Min(30f, (float)letterOpenTimer / 4f)) * 4f, new Rectangle(729 + Math.Min(2, letterOpenTimer / 200) * 131, 508, 131, 79), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
++				b.Draw(texture, origin + new Vector2(286 - parallaxPan, 32f + (float)Math.Max(0, Math.Min(60, (grandpaSpeechTimer - 5000) / 8)) + Math.Min(30f, (float)letterOpenTimer / 4f)) * 4f, new Rectangle(729 + Math.Min(2, letterOpenTimer / 200) * 131, 508, 131, 79), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 1f);
+ 			}
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730), new Rectangle(parallaxPan, 240, 320, 180), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+-			b.Draw(texture, Utility.getTopLeftPositionForCenteringOnScreen(Game1.viewport, 1294, 730) + new Vector2(187f - (float)parallaxPan * 2.5f, 8f) * 4f, new Rectangle(20, 428, 232, 172), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin, new Rectangle(parallaxPan, 240, 320, 180), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			b.Draw(texture, origin + new Vector2(187f - (float)parallaxPan * 2.5f, 8f) * 4f, new Rectangle(20, 428, 232, 172), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+ 		}
+ 		b.End();
+ 		Game1.PushUIMode();
+@@ -467,8 +482,8 @@ public class GrandpaStory : IMinigame
+ 		}
+ 		b.End();
+ 		Game1.PopUIMode();
+-		b.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+-		b.Draw(Game1.staminaRect, new Rectangle(0, 0, Game1.viewport.Width, Game1.viewport.Height), fadingToQuit ? (new Color(64, 136, 248) * foregroundFade) : (Color.Black * foregroundFade));
++		b.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null, null, scaleMatrix);
++		b.Draw(Game1.staminaRect, new Rectangle(0, 0, sceneWidth, sceneHeight), fadingToQuit ? (new Color(64, 136, 248) * foregroundFade) : (Color.Black * foregroundFade));
+ 		b.End();
+ 	}
+ 
+@@ -480,8 +495,12 @@ public class GrandpaStory : IMinigame
+ 
+ 	public void unload()
+ 	{
+-		content.Unload();
++		content?.Unload();
+ 		content = null;
++		if (VitaPlatform.IsVita)
++		{
++			GC.Collect();
++		}
+ 	}
+ 
+ 	public void receiveEventPoke(int data)

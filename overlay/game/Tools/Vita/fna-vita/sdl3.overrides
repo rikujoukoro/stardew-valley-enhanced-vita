@@ -1,0 +1,3 @@
+# SDL3 exports served to [DllImport("SDL3")] by a Vita replacement (vita_sdl_overrides.c).
+SDL_GetBasePath vita_SDL_GetBasePath
+SDL_GetPrefPath vita_SDL_GetPrefPath

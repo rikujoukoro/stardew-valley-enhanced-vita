@@ -1,0 +1,13 @@
+diff --git a/StardewValley.Buildings/JunimoHut.cs b/StardewValley.Buildings/JunimoHut.cs
+index 9cd8d79cb391704d41a92a9e0f86655a590c3a07..913ff811433500266d02315aa0c058330d06d2bc 100644
+--- a/StardewValley.Buildings/JunimoHut.cs
++++ b/StardewValley.Buildings/JunimoHut.cs
+@@ -185,7 +185,7 @@ public class JunimoHut(Vector2 tileLocation) : Building("Junimo Hut", tileLocati
+ 		{
+ 			return;
+ 		}
+-		junimoSendOutTimer -= time.ElapsedGameTime.Milliseconds;
++		junimoSendOutTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 		if (junimoSendOutTimer > 0 || myJunimos.Count >= 3 || location.IsWinterHere() || location.IsRainingHere() || !areThereMatureCropsWithinRadius() || (!(location.NameOrUniqueName != "Farm") && Game1.farmEvent != null))
+ 		{
+ 			return;

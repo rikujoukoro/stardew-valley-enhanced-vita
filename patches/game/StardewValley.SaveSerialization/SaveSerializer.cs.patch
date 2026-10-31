@@ -1,0 +1,146 @@
+diff --git a/StardewValley.SaveSerialization/SaveSerializer.cs b/StardewValley.SaveSerialization/SaveSerializer.cs
+index 48f5bc11f8b39e9b4834d606439501bf46e48597..bae1e005b6460a4cddec3c5d4be858f5a414a09c 100644
+--- a/StardewValley.SaveSerialization/SaveSerializer.cs
++++ b/StardewValley.SaveSerialization/SaveSerializer.cs
+@@ -3,6 +3,7 @@ using System.Collections.Generic;
+ using System.IO;
+ using System.Xml;
+ using System.Xml.Serialization;
++using Microsoft.Xna.Framework;
+ using StardewValley.Quests;
+ using StardewValley.SaveMigrations;
+ 
+@@ -12,6 +13,26 @@ public static class SaveSerializer
+ {
+ 	private static readonly Dictionary<Type, XmlSerializer> _serializerLookup = new Dictionary<Type, XmlSerializer>();
+ 
++	/// <summary>Port: serializers generated ahead of time (Generated/XmlSerializers.cs, from Tools/SerializerGen).</summary>
++	/// <remarks>
++	/// Building an XmlSerializer reflects over every type it can reach and emits IL; on the Vita the save
++	/// serializers took ~150 s that way. SV_RUNTIME_SERIALIZERS=1 builds them at run time as before (to
++	/// compare the two).
++	/// </remarks>
++	private static readonly XmlSerializerImplementation _pregenerated = Environment.GetEnvironmentVariable("SV_RUNTIME_SERIALIZERS") == "1" ? null : new Microsoft.Xml.Serialization.GeneratedAssembly.XmlSerializerContract();
++
++	/// <summary>Port: the pregenerated serializer for a type, or one built at run time with these extra types.</summary>
++	/// <remarks>The pregenerated serializers know all of SaveGame's extra types, a superset of every caller's.</remarks>
++	public static XmlSerializer Create(Type type, Type[] extraTypes = null)
++	{
++		if (_pregenerated != null && _pregenerated.CanSerialize(type))
++		{
++			return _pregenerated.GetSerializer(type);
++		}
++		VitaPlatform.Trace("XmlSerializer built at run time for " + type.FullName);
++		return (extraTypes != null) ? new XmlSerializer(type, extraTypes) : new XmlSerializer(type);
++	}
++
+ 	public static XmlSerializer GetSerializer(Type type)
+ 	{
+ 		if (!_serializerLookup.TryGetValue(type, out var obj))
+@@ -36,7 +57,7 @@ public static class SaveSerializer
+ 			{
+ 				return SaveGame.legacyDescriptionElementSerializer;
+ 			}
+-			obj = new XmlSerializer(type);
++			obj = Create(type);
+ 			_serializerLookup.Add(type, obj);
+ 		}
+ 		return obj;
+@@ -69,11 +90,96 @@ public static class SaveSerializer
+ 
+ 	public static object DeserializeFast(this XmlSerializer serializer, Stream stream)
+ 	{
+-		return serializer.Deserialize(stream);
++		XmlReaderSettings readerSettings = new XmlReaderSettings
++		{
++			CheckCharacters = false,
++			IgnoreWhitespace = true,
++			IgnoreComments = true,
++			CloseInput = false
++		};
++		using (XmlReader reader = XmlReader.Create(stream, readerSettings))
++		{
++			return serializer.Deserialize(reader);
++		}
+ 	}
+ 
+ 	public static object DeserializeFast(this XmlSerializer serializer, XmlReader reader)
+ 	{
+ 		return serializer.Deserialize(reader);
+ 	}
++
++	/// <summary>Port: reads a Vector2, int, long, bool or (non-null) string the way its XmlSerializer wrote it; false, with nothing read, for anything else.</summary>
++	/// <remarks>SerializableDictionary reads every key and value through an XmlSerializer of its own, and these types have no pregenerated one: Mono builds them at run time and interprets them, per key - thousands of Vector2 tile keys in a save.</remarks>
++	public static bool TryReadPrimitive(XmlReader reader, Type type, out object value)
++	{
++		value = null;
++		if (type == typeof(Vector2))
++		{
++			if (!reader.IsStartElement("Vector2") || reader.IsEmptyElement)
++			{
++				return false;
++			}
++			float x = 0f;
++			float y = 0f;
++			reader.ReadStartElement();
++			reader.MoveToContent();
++			while (reader.NodeType == XmlNodeType.Element)
++			{
++				switch (reader.LocalName)
++				{
++				case "X":
++					x = reader.ReadElementContentAsFloat();
++					break;
++				case "Y":
++					y = reader.ReadElementContentAsFloat();
++					break;
++				default:
++					reader.Skip();
++					break;
++				}
++				reader.MoveToContent();
++			}
++			reader.ReadEndElement();
++			value = new Vector2(x, y);
++			return true;
++		}
++		if (type == typeof(int))
++		{
++			if (!reader.IsStartElement("int"))
++			{
++				return false;
++			}
++			value = XmlConvert.ToInt32(reader.ReadElementContentAsString());
++			return true;
++		}
++		if (type == typeof(long))
++		{
++			if (!reader.IsStartElement("long"))
++			{
++				return false;
++			}
++			value = XmlConvert.ToInt64(reader.ReadElementContentAsString());
++			return true;
++		}
++		if (type == typeof(bool))
++		{
++			if (!reader.IsStartElement("boolean"))
++			{
++				return false;
++			}
++			value = XmlConvert.ToBoolean(reader.ReadElementContentAsString());
++			return true;
++		}
++		if (type == typeof(string))
++		{
++			// xsi:nil (a null string) is left to the serializer.
++			if (!reader.IsStartElement("string") || reader.GetAttribute("nil", "http://www.w3.org/2001/XMLSchema-instance") != null)
++			{
++				return false;
++			}
++			value = reader.ReadElementContentAsString();
++			return true;
++		}
++		return false;
++	}
+ }

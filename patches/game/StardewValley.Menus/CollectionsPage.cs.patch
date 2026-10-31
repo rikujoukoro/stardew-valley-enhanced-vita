@@ -1,0 +1,401 @@
+diff --git a/StardewValley.Menus/CollectionsPage.cs b/StardewValley.Menus/CollectionsPage.cs
+index a4da10a56dcbd061dd81236d5295a39480f15cde..9fd4eb7df1c0350b1c4e39c841966f9469e8a0ff 100644
+--- a/StardewValley.Menus/CollectionsPage.cs
++++ b/StardewValley.Menus/CollectionsPage.cs
+@@ -8,6 +8,7 @@ using StardewValley.Extensions;
+ using StardewValley.GameData.Objects;
+ using StardewValley.ItemTypeDefinitions;
+ using StardewValley.Locations;
++using StardewValley.SDKs;
+ 
+ namespace StardewValley.Menus;
+ 
+@@ -81,6 +82,175 @@ public class CollectionsPage : IClickableMenu
+ 
+ 	private int value;
+ 
++	// Port: per-page draw cache (Vita only). The names of the icons ("id True False") never change after the page is built, but draw split and parsed each of them every frame (a string[] and a Convert.ToBoolean per icon, plus a new Random per earned achievement for its sparkle and a ToString + dictionary lookup per trophy cup): about a hundred icons on a full page. They are parsed once when a page is first drawn.
++	private List<ClickableTextureComponent> vitaDrawList;
++
++	private bool[] vitaDrawColor = new bool[0];
++
++	private bool[] vitaDrawFaded = new bool[0];
++
++	private int[] vitaDrawSparkle = new int[0];
++
++	private int[] vitaDrawGrade = new int[0];
++
++	// Port: the tooltip of the icon under the cursor, kept while the cursor stays on it. createDescription (string loads, text wrapping and measuring, a crafting recipe) ran on every frame of a hover.
++	private ClickableTextureComponent vitaHoverComp;
++
++	private string vitaHoverText;
++
++	private int vitaHoverValue;
++
++	private int vitaHoverNoteImage;
++
++	/// <summary>Port: parses the icons of the page being drawn once (see vitaDrawList). Same rules as the PC draw loop.</summary>
++	private void VitaBuildDrawCache(List<ClickableTextureComponent> list)
++	{
++		int count = list.Count;
++		if (vitaDrawColor.Length < count)
++		{
++			int size = Math.Max(128, count);
++			vitaDrawColor = new bool[size];
++			vitaDrawFaded = new bool[size];
++			vitaDrawSparkle = new int[size];
++			vitaDrawGrade = new int[size];
++		}
++		for (int i = 0; i < count; i++)
++		{
++			ClickableTextureComponent c = list[i];
++			string[] nameParts = ArgUtility.SplitBySpace(c.name);
++			bool drawColor = Convert.ToBoolean(nameParts[1]);
++			vitaDrawColor[i] = drawColor;
++			vitaDrawFaded[i] = (currentTab == 4 && Convert.ToBoolean(nameParts[2])) || (currentTab == 5 && !drawColor && c.hoverText != "???");
++			vitaDrawSparkle[i] = -1;
++			vitaDrawGrade[i] = -1;
++			if (currentTab == 5)
++			{
++				if (drawColor)
++				{
++					vitaDrawSparkle[i] = Utility.CreateRandom(Convert.ToInt32(nameParts[0])).Next(12);
++				}
++				if (int.TryParse(nameParts[0], out var achievementId) && VitaTrophies.TryGetGrade(achievementId, out var grade))
++				{
++					vitaDrawGrade[i] = (int)grade;
++				}
++			}
++		}
++		vitaDrawList = list;
++	}
++
++	/// <summary>Port: the icon loop of draw for the Vita, from the page cache.</summary>
++	private void VitaDrawIcons(SpriteBatch b)
++	{
++		List<ClickableTextureComponent> list = collections[currentTab][currentPage];
++		if (vitaDrawList != list)
++		{
++			VitaBuildDrawCache(list);
++		}
++		for (int i = 0; i < list.Count; i++)
++		{
++			ClickableTextureComponent c = list[i];
++			bool drawColor = vitaDrawColor[i];
++			Color c2;
++			if (vitaDrawFaded[i])
++			{
++				c2 = Color.DimGray * 0.4f;
++			}
++			else
++			{
++				c2 = (drawColor ? Color.White : (Color.Black * 0.2f));
++			}
++			c.draw(b, c2, 0.86f);
++			if (vitaDrawSparkle[i] >= 0)
++			{
++				int startPos = vitaDrawSparkle[i];
++				b.Draw(Game1.mouseCursors, new Vector2(c.bounds.X + 16 + 16, c.bounds.Y + 20 + 16), new Rectangle(256 + startPos % 6 * 64 / 2, 128 + startPos / 6 * 64 / 2, 32, 32), Color.White, 0f, new Vector2(16f, 16f), c.scale, SpriteEffects.None, 0.88f);
++			}
++			if (vitaDrawGrade[i] >= 0)
++			{
++				b.Draw(VitaTrophies.Icons, new Vector2(c.bounds.Right - 28, c.bounds.Bottom - 30), VitaTrophies.IconSource((VitaTrophies.Grade)vitaDrawGrade[i]), Color.White * (drawColor ? 1f : 0.45f), 0f, Vector2.Zero, 2f, SpriteEffects.None, 0.89f);
++			}
++		}
++	}
++
++	/// <summary>Port: what the collection grid needs of an object, without the parsed names and descriptions (ParsedItemData ran TokenParser over ~1,900 strings and loaded every object's texture on each open: 150-246 ms).</summary>
++	private sealed class VitaEntry
++	{
++		public string ItemId;
++
++		public string QualifiedItemId;
++
++		public string ObjectType;
++
++		public int Category;
++
++		public string InternalName;
++
++		public string TextureName;
++
++		public int SpriteIndex;
++
++		public bool ExcludeFishing;
++	}
++
++	private static List<VitaEntry> _vitaEntries;
++
++	private static object _vitaEntriesSource;
++
++	/// <summary>Port: the sorted, laid-out entry list, built once per object data (the data changes with the language).</summary>
++	private static List<VitaEntry> VitaGetEntries()
++	{
++		if (_vitaEntries != null && _vitaEntriesSource == Game1.objectData)
++		{
++			return new List<VitaEntry>(_vitaEntries);
++		}
++		List<VitaEntry> all = new List<VitaEntry>(Game1.objectData.Count);
++		foreach (KeyValuePair<string, ObjectData> pair in Game1.objectData)
++		{
++			ObjectData raw = pair.Value;
++			int category = raw.Category;
++			if (category == 0 && raw.Type == "Ring")
++			{
++				category = -96;
++			}
++			all.Add(new VitaEntry
++			{
++				ItemId = pair.Key,
++				QualifiedItemId = "(O)" + pair.Key,
++				ObjectType = raw.Type,
++				Category = category,
++				InternalName = raw.Name,
++				TextureName = raw.Texture ?? "Maps\\springobjects",
++				SpriteIndex = raw.SpriteIndex,
++				ExcludeFishing = raw.ExcludeFromFishingCollection
++			});
++		}
++		List<VitaEntry> dataEntries = new List<VitaEntry>(from entry in all
++			orderby entry.TextureName, entry.SpriteIndex
++			select entry);
++		List<VitaEntry> wineAndFriends = new List<VitaEntry>();
++		for (int i = dataEntries.Count - 1; i >= 0; i--)
++		{
++			string s = dataEntries[i].InternalName;
++			if (s.Equals("Wine") || s.Equals("Pickles") || s.Equals("Jelly") || s.Equals("Juice"))
++			{
++				wineAndFriends.Add(dataEntries[i]);
++				dataEntries.RemoveAt(i);
++			}
++			if (wineAndFriends.Count == 4)
++			{
++				break;
++			}
++		}
++		wineAndFriends.Sort((VitaEntry a, VitaEntry b) => a.InternalName.CompareTo(b.InternalName));
++		dataEntries.Insert(278, wineAndFriends[2]);
++		dataEntries.Insert(279, wineAndFriends[0]);
++		dataEntries.Insert(283, wineAndFriends[3]);
++		dataEntries.Insert(284, wineAndFriends[1]);
++		_vitaEntries = dataEntries;
++		_vitaEntriesSource = Game1.objectData;
++		return new List<VitaEntry>(dataEntries);
++	}
++
+ 	public CollectionsPage(int x, int y, int width, int height)
+ 		: base(x, y, width, height)
+ 	{
+@@ -178,29 +348,13 @@ public class CollectionsPage : IClickableMenu
+ 		int baseX = xPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearSideBorder;
+ 		int baseY = yPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder - 16;
+ 		int collectionWidth = 10;
+-		List<ParsedItemData> dataEntries = new List<ParsedItemData>(from entry in ItemRegistry.GetObjectTypeDefinition().GetAllData()
+-			orderby entry.TextureName, entry.SpriteIndex
+-			select entry);
+-		List<ParsedItemData> wineAndFriends = new List<ParsedItemData>();
+-		for (int i = dataEntries.Count - 1; i >= 0; i--)
++		List<VitaEntry> dataEntries = VitaGetEntries();
++		HashSet<string> donatedIds = new HashSet<string>();
++		foreach (KeyValuePair<Vector2, string> museumPair in Game1.netWorldState.Value.MuseumPieces.Pairs)
+ 		{
+-			string s = dataEntries[i].InternalName;
+-			if (s.Equals("Wine") || s.Equals("Pickles") || s.Equals("Jelly") || s.Equals("Juice"))
+-			{
+-				wineAndFriends.Add(dataEntries[i]);
+-				dataEntries.RemoveAt(i);
+-			}
+-			if (wineAndFriends.Count == 4)
+-			{
+-				break;
+-			}
++			donatedIds.Add(museumPair.Value);
+ 		}
+-		wineAndFriends.Sort((ParsedItemData a, ParsedItemData b) => a.InternalName.CompareTo(b.InternalName));
+-		dataEntries.Insert(278, wineAndFriends[2]);
+-		dataEntries.Insert(279, wineAndFriends[0]);
+-		dataEntries.Insert(283, wineAndFriends[3]);
+-		dataEntries.Insert(284, wineAndFriends[1]);
+-		foreach (ParsedItemData data in dataEntries)
++		foreach (VitaEntry data in dataEntries)
+ 		{
+ 			string id = data.ItemId;
+ 			string type = data.ObjectType;
+@@ -211,10 +365,10 @@ public class CollectionsPage : IClickableMenu
+ 			{
+ 			case "Arch":
+ 				whichCollection = 2;
+-				farmerHas = LibraryMuseum.HasDonatedArtifact(id);
++				farmerHas = donatedIds.Contains(id);
+ 				break;
+ 			case "Fish":
+-				if (data.RawData is ObjectData { ExcludeFromFishingCollection: not false })
++				if (data.ExcludeFishing)
+ 				{
+ 					continue;
+ 				}
+@@ -284,7 +438,7 @@ public class CollectionsPage : IClickableMenu
+ 				goto case "Minerals";
+ 			case "Minerals":
+ 				whichCollection = 3;
+-				farmerHas = LibraryMuseum.HasDonatedArtifact(id);
++				farmerHas = donatedIds.Contains(id);
+ 				break;
+ 			}
+ 			int xPos = baseX + widthUsed[whichCollection] % collectionWidth * 68;
+@@ -301,8 +455,20 @@ public class CollectionsPage : IClickableMenu
+ 				collections[whichCollection].Add(new List<ClickableTextureComponent>());
+ 			}
+ 			List<ClickableTextureComponent> list = collections[whichCollection].Last();
+-			ParsedItemData itemData = ItemRegistry.GetDataOrErrorItem(id);
+-			list.Add(new ClickableTextureComponent(id + " " + farmerHas + " " + farmerHasButNotMade, new Rectangle(xPos, yPos, 64, 64), null, "", itemData.GetTexture(), itemData.GetSourceRect(), 4f, farmerHas)
++			Texture2D iconTexture = null;
++			Rectangle iconSource = Rectangle.Empty;
++			if (Game1.content.DoesAssetExist<Texture2D>(data.TextureName))
++			{
++				iconTexture = Game1.content.Load<Texture2D>(data.TextureName);
++				iconSource = Game1.getSourceRectForStandardTileSheet(iconTexture, data.SpriteIndex, 16, 16);
++			}
++			else
++			{
++				ParsedItemData itemData = ItemRegistry.GetDataOrErrorItem(id);
++				iconTexture = itemData.GetTexture();
++				iconSource = itemData.GetSourceRect();
++			}
++			list.Add(new ClickableTextureComponent(id + " " + farmerHas + " " + farmerHasButNotMade, new Rectangle(xPos, yPos, 64, 64), null, "", iconTexture, iconSource, 4f, farmerHas)
+ 			{
+ 				myID = list.Count,
+ 				rightNeighborID = (((list.Count + 1) % collectionWidth == 0) ? (-1) : (list.Count + 1)),
+@@ -336,6 +502,21 @@ public class CollectionsPage : IClickableMenu
+ 				widthUsed[5]++;
+ 			}
+ 		}
++		// Port: the Steam-only achievements, which the PC game never shows, are trophies on the Vita (VitaTrophies); they follow
++		// on a row of their own, unlocked or not for the console rather than the save, like a Vita trophy list.
++		widthUsed[5] = (widthUsed[5] + collectionWidth - 1) / collectionWidth * collectionWidth;
++		for (int i = 0; i < VitaTrophies.PlatformOnly.Length; i++)
++		{
++			int xPos4 = baseX + widthUsed[5] % collectionWidth * 68;
++			int yPos4 = baseY + widthUsed[5] / collectionWidth * 68;
++			if (yPos4 > yPositionOnScreen + height - 128)
++			{
++				break;
++			}
++			bool unlocked = VitaTrophies.IsUnlocked(VitaTrophies.PlatformOnly[i]);
++			collections[5][0].Add(new ClickableTextureComponent(VitaTrophies.CollectionsIdBase + i + " " + unlocked, new Rectangle(xPos4, yPos4, 64, 64), null, "", Game1.mouseCursors, Game1.getSourceRectForStandardTileSheet(Game1.mouseCursors, 25), 1f));
++			widthUsed[5]++;
++		}
+ 		if (Game1.player.secretNotesSeen.Count > 0)
+ 		{
+ 			if (collections[6].Count == 0)
+@@ -343,7 +524,6 @@ public class CollectionsPage : IClickableMenu
+ 				collections[6].Add(new List<ClickableTextureComponent>());
+ 			}
+ 			secretNotesData = DataLoader.SecretNotes(Game1.content);
+-			secretNoteImageTexture = Game1.temporaryContent.Load<Texture2D>("TileSheets\\SecretNotesImages");
+ 			bool show_journals = Game1.player.secretNotesSeen.Contains(GameLocation.JOURNAL_INDEX + 1);
+ 			foreach (int i2 in secretNotesData.Keys)
+ 			{
+@@ -649,6 +829,15 @@ public class CollectionsPage : IClickableMenu
+ 			if (c2.containsPoint(x, y, 2))
+ 			{
+ 				c2.scale = Math.Min(c2.scale + 0.02f, c2.baseScale + 0.1f);
++				if (VitaPlatform.IsVita && vitaHoverComp == c2)
++				{
++					// Port: still on the same icon; its tooltip is the one built on the first frame.
++					hoverText = vitaHoverText;
++					value = vitaHoverValue;
++					secretNoteImage = vitaHoverNoteImage;
++					hoveredAny = true;
++					continue;
++				}
+ 				string[] data_split = ArgUtility.SplitBySpace(c2.name);
+ 				if (currentTab == 5 || (data_split.Length > 1 && Convert.ToBoolean(data_split[1])) || (data_split.Length > 2 && Convert.ToBoolean(data_split[2])))
+ 				{
+@@ -669,6 +858,13 @@ public class CollectionsPage : IClickableMenu
+ 					}
+ 					hoverText = "???";
+ 				}
++				if (VitaPlatform.IsVita)
++				{
++					vitaHoverComp = c2;
++					vitaHoverText = hoverText;
++					vitaHoverValue = value;
++					vitaHoverNoteImage = secretNoteImage;
++				}
+ 				hoveredAny = true;
+ 			}
+ 			else
+@@ -679,6 +875,7 @@ public class CollectionsPage : IClickableMenu
+ 		if (!hoveredAny)
+ 		{
+ 			hoverItem = null;
++			vitaHoverComp = null;
+ 		}
+ 		forwardButton.tryHover(x, y, 0.5f);
+ 		backButton.tryHover(x, y, 0.5f);
+@@ -696,9 +893,23 @@ public class CollectionsPage : IClickableMenu
+ 				return "???";
+ 			}
+ 			int index = int.Parse(id);
+-			string[] split = Game1.achievements[index].Split('^');
+-			description = description + split[0] + Environment.NewLine + Environment.NewLine;
+-			description += split[1];
++			if (index >= VitaTrophies.CollectionsIdBase)
++			{
++				VitaTrophies.Trophy trophy = VitaTrophies.PlatformOnly[index - VitaTrophies.CollectionsIdBase];
++				description = description + trophy.DisplayName + Environment.NewLine + Environment.NewLine;
++				description += Game1.parseText(trophy.Description, Game1.smallFont, 384);
++			}
++			else
++			{
++				string[] split = Game1.achievements[index].Split('^');
++				description = description + split[0] + Environment.NewLine + Environment.NewLine;
++				description += split[1];
++			}
++			// Port: the trophy grade (VitaTrophies).
++			if (VitaTrophies.TryGetGrade(index, out var grade))
++			{
++				description = description + Environment.NewLine + Environment.NewLine + VitaTrophies.GradeName(grade);
++			}
+ 			break;
+ 		}
+ 		case 6:
+@@ -823,6 +1034,11 @@ public class CollectionsPage : IClickableMenu
+ 		}
+ 		b.End();
+ 		b.Begin(SpriteSortMode.FrontToBack, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
++		if (VitaPlatform.IsVita)
++		{
++			VitaDrawIcons(b);
++		}
++		else
+ 		foreach (ClickableTextureComponent c in collections[currentTab][currentPage])
+ 		{
+ 			string[] nameParts = ArgUtility.SplitBySpace(c.name);
+@@ -845,6 +1061,14 @@ public class CollectionsPage : IClickableMenu
+ 				int startPos = Utility.CreateRandom(Convert.ToInt32(nameParts[0])).Next(12);
+ 				b.Draw(Game1.mouseCursors, new Vector2(c.bounds.X + 16 + 16, c.bounds.Y + 20 + 16), new Rectangle(256 + startPos % 6 * 64 / 2, 128 + startPos / 6 * 64 / 2, 32, 32), Color.White, 0f, new Vector2(16f, 16f), c.scale, SpriteEffects.None, 0.88f);
+ 			}
++			if (currentTab == 5 && int.TryParse(nameParts[0], out var achievementId))
++			{
++				// Port: the trophy grade (VitaTrophies) as a small cup in the corner, faint while locked.
++				if (VitaTrophies.TryGetGrade(achievementId, out var grade))
++				{
++					b.Draw(VitaTrophies.Icons, new Vector2(c.bounds.Right - 28, c.bounds.Bottom - 30), VitaTrophies.IconSource(grade), Color.White * (drawColor ? 1f : 0.45f), 0f, Vector2.Zero, 2f, SpriteEffects.None, 0.89f);
++				}
++			}
+ 		}
+ 		b.End();
+ 		b.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+@@ -872,6 +1096,10 @@ public class CollectionsPage : IClickableMenu
+ 			IClickableMenu.drawHoverText(b, hoverText, Game1.smallFont, 0, 0, this.value);
+ 			if (secretNoteImage != -1)
+ 			{
++				if (secretNoteImageTexture == null)
++				{
++					secretNoteImageTexture = Game1.temporaryContent.Load<Texture2D>("TileSheets\\SecretNotesImages");
++				}
+ 				IClickableMenu.drawTextureBox(b, Game1.getOldMouseX(), Game1.getOldMouseY() + 64 + 32, 288, 288, Color.White);
+ 				b.Draw(secretNoteImageTexture, new Vector2(Game1.getOldMouseX() + 16, Game1.getOldMouseY() + 64 + 32 + 16), new Rectangle(secretNoteImage * 64 % secretNoteImageTexture.Width, secretNoteImage * 64 / secretNoteImageTexture.Width * 64, 64, 64), Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 0.865f);
+ 			}

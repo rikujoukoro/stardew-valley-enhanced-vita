@@ -1,0 +1,29 @@
+diff --git a/src/Graphics/FNA3D.cs b/src/Graphics/FNA3D.cs
+index c7459b4dd7eee537327061f1e8276ef9a59778ab..3aaab88760c657efaa7f6de8b1e58af1b11317fe 100644
+--- a/src/Graphics/FNA3D.cs
++++ b/src/Graphics/FNA3D.cs
+@@ -809,6 +809,24 @@ namespace Microsoft.Xna.Framework.Graphics
+ 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+ 		public static extern byte FNA3D_SupportsNoOverwrite(IntPtr device);
+ 
++		/* Vita port: SpriteBatch flushes on FNA3D's render thread (fna3d-vita/FNA3D_VitaThread.c).
++		 * Not in other FNA3D builds: call FNA3D_VitaSpriteBatchAvailable inside a try. */
++		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
++		public static extern byte FNA3D_VitaSpriteBatchAvailable(IntPtr device);
++
++		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
++		public static extern void FNA3D_VitaSpriteBatch(
++			IntPtr device,
++			IntPtr sprites,
++			IntPtr textures,
++			int count,
++			int sortMode,
++			ref FNA3D_SamplerState sampler,
++			ref FNA3D_VertexBufferBinding binding,
++			byte bindingsUpdated,
++			IntPtr indices
++		);
++
+ 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+ 		public static extern byte FNA3D_SupportsSRGBRenderTargets(IntPtr device);
+ 

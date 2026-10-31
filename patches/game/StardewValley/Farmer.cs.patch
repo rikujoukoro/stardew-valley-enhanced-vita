@@ -1,0 +1,660 @@
+diff --git a/StardewValley/Farmer.cs b/StardewValley/Farmer.cs
+index ed126318d2192b8d997e636ce76cdc052a8eb884..140c275f5f619562e4d225c2d819ad80d66e01a7 100644
+--- a/StardewValley/Farmer.cs
++++ b/StardewValley/Farmer.cs
+@@ -1794,12 +1794,28 @@ public class Farmer : Character, IComparable
+ 	[XmlIgnore]
+ 	public int Immunity => buffs.Immunity;
+ 
++	[XmlIgnore]
++	private int _bookSpeedCacheTick = -1000;
++
++	[XmlIgnore]
++	private float _cachedBookSpeedBonus;
++
+ 	[XmlIgnore]
+ 	public override float addedSpeed
+ 	{
+ 		get
+ 		{
+-			return buffs.Speed + ((stats.Get("Book_Speed") != 0 && !isRidingHorse()) ? 0.25f : 0f) + ((stats.Get("Book_Speed2") != 0 && !isRidingHorse()) ? 0.25f : 0f);
++			if (isRidingHorse())
++			{
++				return buffs.Speed;
++			}
++			int ticks = Game1.ticks;
++			if (ticks - _bookSpeedCacheTick >= 60 || ticks < _bookSpeedCacheTick)
++			{
++				_bookSpeedCacheTick = ticks;
++				_cachedBookSpeedBonus = ((stats.Get("Book_Speed") != 0) ? 0.25f : 0f) + ((stats.Get("Book_Speed2") != 0) ? 0.25f : 0f);
++			}
++			return buffs.Speed + _cachedBookSpeedBonus;
+ 		}
+ 		set
+ 		{
+@@ -4124,7 +4140,19 @@ public class Farmer : Character, IComparable
+ 
+ 	public IEnumerable<Item> GetEquippedItems()
+ 	{
+-		return new Item[7] { CurrentTool, hat.Value, shirtItem.Value, pantsItem.Value, boots.Value, leftRing.Value, rightRing.Value }.Where((Item item) => item != null);
++		// Buff checks enumerate immediately: avoid a temporary array, LINQ and copied List.
++		Item tool = CurrentTool;
++		if (tool != null) yield return tool;
++		if (hat.Value != null) yield return hat.Value;
++		if (shirtItem.Value != null) yield return shirtItem.Value;
++		if (pantsItem.Value != null) yield return pantsItem.Value;
++		if (boots.Value != null) yield return boots.Value;
++		if (leftRing.Value != null) yield return leftRing.Value;
++		if (rightRing.Value != null) yield return rightRing.Value;
++		Inventory extra = VitaExtraRings.GetEquippedInventory(this);
++		if (extra == null) yield break;
++		for (int i = 0; i < VitaExtraRings.Count && i < extra.Count; i++)
++			if (extra[i] is Ring ring) yield return ring;
+ 	}
+ 
+ 	public override bool collideWith(Object o)
+@@ -4238,6 +4266,7 @@ public class Farmer : Character, IComparable
+ 				{
+ 					item.onDetachedFromParent();
+ 					Items[i] = item;
++					_acceptCacheTick = -1;
+ 					stackLeft = 0;
+ 					OnItemReceived(item, item.Stack, null, hideHudNotification: true);
+ 					affected_items_list?.Add(Items[i]);
+@@ -4273,6 +4302,7 @@ public class Farmer : Character, IComparable
+ 			if (Items[position] == null)
+ 			{
+ 				Items[position] = item;
++				_acceptCacheTick = -1;
+ 				OnItemReceived(item, item.Stack, null);
+ 				return null;
+ 			}
+@@ -4649,10 +4679,61 @@ public class Farmer : Character, IComparable
+ 		}
+ 	}
+ 
++	[XmlIgnore]
++	private int _lastMergedSlotIndex = -1;
++
++	[XmlIgnore]
++	private int _acceptCacheTick = -1;
++
++	[XmlIgnore]
++	private bool _acceptCacheHasEmptySlot;
++
++	[XmlIgnore]
++	private string _acceptCacheItemId;
++
++	[XmlIgnore]
++	private int _acceptCacheQuality;
++
++	[XmlIgnore]
++	private int _acceptCacheStack;
++
++	[XmlIgnore]
++	private bool _acceptCacheResult;
++
+ 	public bool couldInventoryAcceptThisItem(string id, int stack, int quality = 0)
+ 	{
+-		ParsedItemData itemData = ItemRegistry.GetDataOrErrorItem(id);
+-		switch (itemData.QualifiedItemId)
++		return couldInventoryAcceptThisItem(id, stack, quality, null);
++	}
++
++	public bool couldInventoryAcceptThisItem(string id, int stack, int quality, ParsedItemData cachedItemData)
++	{
++		if (_acceptCacheTick != Game1.ticks)
++		{
++			_acceptCacheTick = Game1.ticks;
++			_acceptCacheItemId = null;
++			bool hasEmpty = false;
++			int max = Math.Min(maxItems.Value, Items.Count);
++			for (int i = 0; i < max; i++)
++			{
++				if (Items[i] == null)
++				{
++					hasEmpty = true;
++					break;
++				}
++			}
++			_acceptCacheHasEmptySlot = hasEmpty;
++		}
++		if (_acceptCacheHasEmptySlot && stack <= 999)
++		{
++			return true;
++		}
++		if (_acceptCacheItemId == id && _acceptCacheQuality == quality && _acceptCacheStack == stack)
++		{
++			return _acceptCacheResult;
++		}
++		ParsedItemData itemData = cachedItemData ?? ItemRegistry.GetDataOrErrorItem(id);
++		string qid = itemData.QualifiedItemId;
++		switch (qid)
+ 		{
+ 		case "(O)73":
+ 		case "(O)930":
+@@ -4662,10 +4743,16 @@ public class Farmer : Character, IComparable
+ 			return true;
+ 		default:
+ 		{
+-			for (int i = 0; i < maxItems.Value; i++)
++			int max2 = Math.Min(maxItems.Value, Items.Count);
++			for (int i = 0; i < max2; i++)
+ 			{
+-				if (Items.Count > i && (Items[i] == null || (Items[i].Stack + stack <= Items[i].maximumStackSize() && Items[i].QualifiedItemId == itemData.QualifiedItemId && Items[i].quality.Value == quality)))
++				Item slot = Items[i];
++				if (slot == null || (slot.Stack + stack <= slot.maximumStackSize() && slot.QualifiedItemId == qid && slot.quality.Value == quality))
+ 				{
++					_acceptCacheItemId = id;
++					_acceptCacheQuality = quality;
++					_acceptCacheStack = stack;
++					_acceptCacheResult = true;
+ 					return true;
+ 				}
+ 			}
+@@ -4673,11 +4760,176 @@ public class Farmer : Character, IComparable
+ 			{
+ 				Game1.showRedMessage(Game1.content.LoadString("Strings\\StringsFromCSFiles:Crop.cs.588"));
+ 			}
++			_acceptCacheItemId = id;
++			_acceptCacheQuality = quality;
++			_acceptCacheStack = stack;
++			_acceptCacheResult = false;
+ 			return false;
+ 		}
+ 		}
+ 	}
+ 
++	public Object TryFindStackForDebris(string rawItemId, int stack, int quality, ParsedItemData cachedData)
++	{
++		if (!IsLocalPlayer || rawItemId == null || stack <= 0)
++		{
++			return null;
++		}
++		ParsedItemData data = cachedData ?? ItemRegistry.GetDataOrErrorItem(rawItemId);
++		if (data == null || !data.HasTypeObject())
++		{
++			return null;
++		}
++		string qid = data.QualifiedItemId;
++		switch (qid)
++		{
++		case "(O)73":
++		case "(O)102":
++		case "(O)858":
++		case "(O)930":
++		case "(O)GoldCoin":
++		case "(O)535":
++		case "(O)74":
++		case "(O)72":
++			return null;
++		}
++		if (data.Category == -2 || data.ObjectType == "Minerals" || data.ObjectType == "Arch")
++		{
++			return null;
++		}
++		int max = Math.Min(maxItems.Value, Items.Count);
++		int hint = _lastMergedSlotIndex;
++		if ((uint)hint < (uint)max)
++		{
++			Item hinted = Items[hint];
++			if (hinted != null && hinted.GetType() == typeof(Object) && hinted.QualifiedItemId == qid && hinted.quality.Value == quality && hinted.Stack + stack <= hinted.maximumStackSize() && ((Object)hinted).orderData.Value == null && hinted.Name == data.InternalName)
++			{
++				return (Object)hinted;
++			}
++		}
++		for (int i = 0; i < max; i++)
++		{
++			Item slot = Items[i];
++			if (slot != null && slot.GetType() == typeof(Object) && slot.QualifiedItemId == qid && slot.quality.Value == quality && slot.Stack + stack <= slot.maximumStackSize() && ((Object)slot).orderData.Value == null && slot.Name == data.InternalName)
++			{
++				_lastMergedSlotIndex = i;
++				return (Object)slot;
++			}
++		}
++		return null;
++	}
++
++	public void OnStackMergedFromDebris(Object actualItem, int countAdded)
++	{
++		if (!IsLocalPlayer || actualItem == null || countAdded <= 0)
++		{
++			return;
++		}
++		_acceptCacheItemId = null;
++		ShowItemReceivedHudMessage(actualItem, countAdded);
++		if (freezePause <= 0)
++		{
++			mostRecentlyGrabbedItem = actualItem;
++		}
++		if (actualItem.specialItem)
++		{
++			string key = (actualItem.IsRecipe ? ("-" + actualItem.ItemId) : actualItem.ItemId);
++			if (actualItem.bigCraftable.Value)
++			{
++				if (!specialBigCraftables.Contains(key))
++				{
++					specialBigCraftables.Add(key);
++				}
++			}
++			else if (!specialItems.Contains(key))
++			{
++				specialItems.Add(key);
++			}
++		}
++		if (questLog.Count > 0 || (team.specialOrders != null && team.specialOrders.Count > 0))
++		{
++			int originalStack = actualItem.Stack;
++			try
++			{
++				actualItem.Stack = countAdded;
++				for (int qi = questLog.Count - 1; qi >= 0; qi--)
++				{
++					Quest quest = questLog[qi];
++					if (quest == null)
++					{
++						questLog.RemoveAt(qi);
++					}
++					else if (!quest.completed.Value)
++					{
++						quest.OnItemReceived(actualItem, countAdded);
++					}
++				}
++				if (team.specialOrders != null)
++				{
++					foreach (SpecialOrder specialOrder in team.specialOrders)
++					{
++						specialOrder.onItemCollected?.Invoke(this, actualItem);
++					}
++				}
++			}
++			finally
++			{
++				actualItem.Stack = originalStack;
++			}
++		}
++		switch (actualItem.QualifiedItemId)
++		{
++		case "(O)428":
++			if (!hasOrWillReceiveMail("clothFound"))
++			{
++				Game1.addMailForTomorrow("clothFound", noLetter: true);
++			}
++			break;
++		case "(O)390":
++			stats.StoneGathered += (uint)countAdded;
++			if (stats.StoneGathered >= 100 && !hasOrWillReceiveMail("robinWell"))
++			{
++				Game1.addMailForTomorrow("robinWell");
++			}
++			break;
++		case "(O)384":
++			stats.GoldFound += (uint)countAdded;
++			break;
++		case "(O)380":
++			stats.IronFound += (uint)countAdded;
++			break;
++		case "(O)386":
++			stats.IridiumFound += (uint)countAdded;
++			break;
++		case "(O)378":
++			stats.CopperFound += (uint)countAdded;
++			if (!hasOrWillReceiveMail("copperFound"))
++			{
++				Game1.addMailForTomorrow("copperFound", noLetter: true);
++			}
++			break;
++		case "(O)875":
++			if (!Game1.MasterPlayer.hasOrWillReceiveMail("ectoplasmDrop") && team.SpecialOrderActive("Wizard"))
++			{
++				Game1.addMailForTomorrow("ectoplasmDrop", noLetter: true, sendToEveryone: true);
++			}
++			break;
++		case "(O)876":
++			if (!Game1.MasterPlayer.hasOrWillReceiveMail("prismaticJellyDrop") && team.SpecialOrderActive("Wizard2"))
++			{
++				Game1.addMailForTomorrow("prismaticJellyDrop", noLetter: true, sendToEveryone: true);
++			}
++			break;
++		case "(O)897":
++			if (!Game1.MasterPlayer.hasOrWillReceiveMail("gotMissingStocklist"))
++			{
++				Game1.addMailForTomorrow("gotMissingStocklist", noLetter: true, sendToEveryone: true);
++			}
++			break;
++		}
++		actualItem.HasBeenInInventory = true;
++	}
++
+ 	public NPC getSpouse()
+ 	{
+ 		if (isMarriedOrRoommates() && spouse != null)
+@@ -4736,7 +4988,11 @@ public class Farmer : Character, IComparable
+ 		{
+ 			return;
+ 		}
+-		(item as Object)?.reloadSprite();
++		_acceptCacheItemId = null;
++		if (mergedIntoStack == null)
++		{
++			(item as Object)?.reloadSprite();
++		}
+ 		if (item.HasBeenInInventory)
+ 		{
+ 			return;
+@@ -4784,22 +5040,36 @@ public class Farmer : Character, IComparable
+ 			Game1.playSound("newRecipe");
+ 			return;
+ 		}
+-		int originalStack = actualItem.Stack;
+-		try
++		if (questLog.Count > 0 || (team.specialOrders != null && team.specialOrders.Count > 0))
+ 		{
+-			actualItem.Stack = countAdded;
+-			NotifyQuests((Quest quest) => quest.OnItemReceived(actualItem, countAdded));
+-			if (team.specialOrders != null)
++			int originalStack = actualItem.Stack;
++			try
+ 			{
+-				foreach (SpecialOrder specialOrder in team.specialOrders)
++				actualItem.Stack = countAdded;
++				for (int qi = questLog.Count - 1; qi >= 0; qi--)
+ 				{
+-					specialOrder.onItemCollected?.Invoke(this, actualItem);
++					Quest quest = questLog[qi];
++					if (quest == null)
++					{
++						questLog.RemoveAt(qi);
++					}
++					else if (!quest.completed.Value)
++					{
++						quest.OnItemReceived(actualItem, countAdded);
++					}
++				}
++				if (team.specialOrders != null)
++				{
++					foreach (SpecialOrder specialOrder in team.specialOrders)
++					{
++						specialOrder.onItemCollected?.Invoke(this, actualItem);
++					}
+ 				}
+ 			}
+-		}
+-		finally
+-		{
+-			actualItem.Stack = originalStack;
++			finally
++			{
++				actualItem.Stack = originalStack;
++			}
+ 		}
+ 		if (actualItem.HasTypeObject() && actualItem is Object obj2)
+ 		{
+@@ -4812,7 +5082,10 @@ public class Farmer : Character, IComparable
+ 				foundArtifact(obj2.ItemId, 1);
+ 			}
+ 		}
+-		stats.checkForHeldItemAchievements();
++		if (actualItem.TypeDefinitionId == "(W)")
++		{
++			stats.checkForHeldItemAchievements();
++		}
+ 		switch (actualItem.QualifiedItemId)
+ 		{
+ 		case "(O)GoldCoin":
+@@ -4951,6 +5224,26 @@ public class Farmer : Character, IComparable
+ 	{
+ 		if (Game1.activeClickableMenu == null || !(Game1.activeClickableMenu is ItemGrabMenu))
+ 		{
++			string itemType = item.Name;
++			if (itemType != null)
++			{
++				List<HUDMessage> msgs = Game1.hudMessages;
++				for (int i = 0; i < msgs.Count; i++)
++				{
++					HUDMessage existing = msgs[i];
++					if (existing.type == itemType)
++					{
++						existing.number += countAdded;
++						existing.timeLeft = 3500f;
++						existing.transparency = 1f;
++						if (existing.number > 50000)
++						{
++							HUDMessage.numbersEasterEgg(existing.number);
++						}
++						return;
++					}
++				}
++			}
+ 			Game1.addHUDMessage(HUDMessage.ForItemGained(item, countAdded));
+ 		}
+ 	}
+@@ -5559,7 +5852,7 @@ public class Farmer : Character, IComparable
+ 		}
+ 		if (xVelocity != 0f || yVelocity != 0f)
+ 		{
+-			raftPuddleCounter -= time.ElapsedGameTime.Milliseconds;
++			raftPuddleCounter -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 			if (raftPuddleCounter <= 0)
+ 			{
+ 				raftPuddleCounter = 250;
+@@ -5574,7 +5867,7 @@ public class Farmer : Character, IComparable
+ 				}
+ 			}
+ 		}
+-		raftBobCounter -= time.ElapsedGameTime.Milliseconds;
++		raftBobCounter -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 		if (raftBobCounter <= 0)
+ 		{
+ 			raftBobCounter = Game1.random.Next(15, 28) * 100;
+@@ -6288,6 +6581,7 @@ public class Farmer : Character, IComparable
+ 		{
+ 			rightRing.Value?.onLeaveLocation(this, currentLocation);
+ 			leftRing.Value?.onLeaveLocation(this, currentLocation);
++			VitaExtraRings.OnLeaveLocation(this, currentLocation);
+ 		}
+ 		UnapplyAllTrinketEffects();
+ 		disconnectDay.Value = (int)Game1.stats.DaysPlayed;
+@@ -7173,6 +7467,11 @@ public class Farmer : Character, IComparable
+ 		{
+ 			return;
+ 		}
++		// Port: the Vita test menu's invincibility (the game's own debug command only lengthens the short invincibility after a hit, which the game then resets).
++		if (VitaDebugMenu.Invincible && IsLocalPlayer)
++		{
++			return;
++		}
+ 		bool num = damager != null && !damager.isInvincible() && !overrideParry;
+ 		bool monsterDamageCapable = (damager == null || !damager.isInvincible()) && (damager == null || (!(damager is GreenSlime) && !(damager is BigSlime)) || !isWearingRing("520"));
+ 		bool playerParryable = CurrentTool is MeleeWeapon && ((MeleeWeapon)CurrentTool).isOnSpecial && ((MeleeWeapon)CurrentTool).type.Value == 3;
+@@ -7291,7 +7590,7 @@ public class Farmer : Character, IComparable
+ 		{
+ 			count += rightRing.Value.GetEffectsOfRingMultiplier(ringId);
+ 		}
+-		return count;
++		return count + VitaExtraRings.EffectMultiplier(this, ringId);
+ 	}
+ 
+ 	private void checkDamage(GameLocation location)
+@@ -7350,7 +7649,7 @@ public class Farmer : Character, IComparable
+ 			}
+ 			return false;
+ 		}
+-		if (who.CurrentItem != null && who.CurrentItem.QualifiedItemId == "(O)801" && !isMarriedOrRoommates() && !isEngaged() && !who.isMarriedOrRoommates() && !who.isEngaged())
++		if (who.CurrentItem != null && who.CurrentItem.QualifiedItemId == "(O)801" && !VitaTractorMod.IsKit(who.CurrentItem) && !isMarriedOrRoommates() && !isEngaged() && !who.isMarriedOrRoommates() && !who.isEngaged())
+ 		{
+ 			who.Halt();
+ 			who.faceGeneralDirection(getStandingPosition(), 0, opposite: false, useTileCalculations: false);
+@@ -7463,7 +7762,7 @@ public class Farmer : Character, IComparable
+ 		if (noMovementPause > 0)
+ 		{
+ 			CanMove = false;
+-			noMovementPause -= time.ElapsedGameTime.Milliseconds;
++			noMovementPause -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 			if (noMovementPause <= 0)
+ 			{
+ 				CanMove = true;
+@@ -7472,7 +7771,7 @@ public class Farmer : Character, IComparable
+ 		if (freezePause > 0)
+ 		{
+ 			CanMove = false;
+-			freezePause -= time.ElapsedGameTime.Milliseconds;
++			freezePause -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 			if (freezePause <= 0)
+ 			{
+ 				CanMove = true;
+@@ -7513,7 +7812,7 @@ public class Farmer : Character, IComparable
+ 		}
+ 		if (isInBed.Value && Game1.IsMultiplayer && Game1.shouldTimePass())
+ 		{
+-			regenTimer -= time.ElapsedGameTime.Milliseconds;
++			regenTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 			if (regenTimer < 0)
+ 			{
+ 				regenTimer = 500;
+@@ -7583,7 +7882,7 @@ public class Farmer : Character, IComparable
+ 			NPC collider;
+ 			if (movementDirections.Count > 0 && !isRidingHorse() && (collider = location.isCollidingWithCharacter(nextPosition(FacingDirection))) != null)
+ 			{
+-				charactercollisionTimer += time.ElapsedGameTime.Milliseconds;
++				charactercollisionTimer += Utility.ElapsedMs(time.ElapsedGameTime);
+ 				if (charactercollisionTimer > collider.getTimeFarmerMustPushBeforeStartShaking())
+ 				{
+ 					collider.shake(50);
+@@ -7691,7 +7990,7 @@ public class Farmer : Character, IComparable
+ 			currentEyes = 4;
+ 			blinkTimer = -1000;
+ 		}
+-		blinkTimer += time.ElapsedGameTime.Milliseconds;
++		blinkTimer += Utility.ElapsedMs(time.ElapsedGameTime);
+ 		if (blinkTimer > 2200 && Game1.random.NextDouble() < 0.01)
+ 		{
+ 			blinkTimer = -150;
+@@ -7722,7 +8021,7 @@ public class Farmer : Character, IComparable
+ 		{
+ 			yOffset = (float)(Math.Cos(time.TotalGameTime.TotalMilliseconds / 2000.0) * 4.0);
+ 			int oldSwimTimer = swimTimer;
+-			swimTimer -= time.ElapsedGameTime.Milliseconds;
++			swimTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 			if (timerSinceLastMovement == 0)
+ 			{
+ 				if (oldSwimTimer > 400 && swimTimer <= 400 && IsLocalPlayer)
+@@ -7765,7 +8064,7 @@ public class Farmer : Character, IComparable
+ 		}
+ 		if (!isMoving())
+ 		{
+-			timerSinceLastMovement += time.ElapsedGameTime.Milliseconds;
++			timerSinceLastMovement += Utility.ElapsedMs(time.ElapsedGameTime);
+ 		}
+ 		else
+ 		{
+@@ -7784,6 +8083,7 @@ public class Farmer : Character, IComparable
+ 		}
+ 		rightRing.Value?.update(time, location, this);
+ 		leftRing.Value?.update(time, location, this);
++		VitaExtraRings.Update(time, location, this);
+ 		if (Game1.shouldTimePass() && IsLocalPlayer)
+ 		{
+ 			foreach (Trinket trinketItem in trinketItems)
+@@ -7944,7 +8244,7 @@ public class Farmer : Character, IComparable
+ 		{
+ 			movementMultiplier = 0.066f;
+ 			float movementSpeed = 1f;
+-			movementSpeed = ((!isRidingHorse()) ? Math.Max(1f, ((float)speed + (Game1.eventUp ? 0f : (addedSpeed + temporarySpeedBuff))) * movementMultiplier * (float)Game1.currentGameTime.ElapsedGameTime.Milliseconds) : Math.Max(1f, ((float)speed + (Game1.eventUp ? 0f : (addedSpeed + 4.6f + (mount.ateCarrotToday ? 0.4f : 0f) + ((stats.Get("Book_Horse") != 0) ? 0.5f : 0f)))) * movementMultiplier * (float)Game1.currentGameTime.ElapsedGameTime.Milliseconds));
++			movementSpeed = ((!isRidingHorse()) ? Math.Max(1f, ((float)speed + (Game1.eventUp ? 0f : (addedSpeed + temporarySpeedBuff))) * movementMultiplier * (float)Utility.ElapsedMs(Game1.currentGameTime.ElapsedGameTime)) : Math.Max(1f, ((float)speed + (Game1.eventUp ? 0f : (addedSpeed + 4.6f + (mount.ateCarrotToday ? 0.4f : 0f) + ((stats.Get("Book_Horse") != 0) ? 0.5f : 0f)))) * movementMultiplier * (float)Utility.ElapsedMs(Game1.currentGameTime.ElapsedGameTime)));
+ 			if (movementDirections.Count > 1)
+ 			{
+ 				movementSpeed *= 0.707f;
+@@ -7955,7 +8255,7 @@ public class Farmer : Character, IComparable
+ 			}
+ 			return movementSpeed;
+ 		}
+-		float movementSpeed2 = Math.Max(1f, (float)speed + (Game1.eventUp ? ((float)Math.Max(0, Game1.CurrentEvent.farmerAddedSpeed - 2)) : (addedSpeed + (isRidingHorse() ? 5f : temporarySpeedBuff))));
++		float movementSpeed2 = Math.Max(1f, (float)speed + (Game1.eventUp ? ((float)Math.Max(0, Game1.CurrentEvent.farmerAddedSpeed - 2)) : (addedSpeed + (isRidingHorse() ? (VitaTractorMod.IsTractor(mount) ? 7f : 5f) : temporarySpeedBuff))));
+ 		if (movementDirections.Count > 1)
+ 		{
+ 			movementSpeed2 = Math.Max(1, (int)Math.Sqrt(2f * (movementSpeed2 * movementSpeed2)) / 2);
+@@ -7965,6 +8265,10 @@ public class Farmer : Character, IComparable
+ 
+ 	public bool isWearingRing(string itemId)
+ 	{
++		if (VitaExtraRings.Enabled && VitaExtraRings.CountWearing(this, itemId) > 0)
++		{
++			return true;
++		}
+ 		if (rightRing.Value == null || !rightRing.Value.GetsEffectOfRing(itemId))
+ 		{
+ 			if (leftRing.Value != null)
+@@ -7987,7 +8291,7 @@ public class Farmer : Character, IComparable
+ 		{
+ 			num++;
+ 		}
+-		return num;
++		return num + VitaExtraRings.CountWearing(this, itemId);
+ 	}
+ 
+ 	public override void Halt()
+@@ -8342,7 +8646,7 @@ public class Farmer : Character, IComparable
+ 				{
+ 					currentTemporaryInvincibilityDuration = 1200;
+ 				}
+-				temporaryInvincibilityTimer += time.ElapsedGameTime.Milliseconds;
++				temporaryInvincibilityTimer += Utility.ElapsedMs(time.ElapsedGameTime);
+ 				if (temporaryInvincibilityTimer > currentTemporaryInvincibilityDuration)
+ 				{
+ 					temporarilyInvincible = false;
+@@ -8416,7 +8720,7 @@ public class Farmer : Character, IComparable
+ 		}
+ 		if (movementDirections.Count > 0 && !UsingTool)
+ 		{
+-			FarmerSprite.intervalModifier = 1f - (running ? 0.0255f : 0.025f) * (Math.Max(1f, ((float)speed + (Game1.eventUp ? 0f : ((float)(int)addedSpeed + (isRidingHorse() ? 4.6f : 0f)))) * movementMultiplier * (float)Game1.currentGameTime.ElapsedGameTime.Milliseconds) * 1.25f);
++			FarmerSprite.intervalModifier = 1f - (running ? 0.0255f : 0.025f) * (Math.Max(1f, ((float)speed + (Game1.eventUp ? 0f : ((float)(int)addedSpeed + (isRidingHorse() ? 4.6f : 0f)))) * movementMultiplier * (float)Utility.ElapsedMs(Game1.currentGameTime.ElapsedGameTime)) * 1.25f);
+ 		}
+ 		else
+ 		{
+@@ -8483,11 +8787,11 @@ public class Farmer : Character, IComparable
+ 				bool rightCorner = currentLocation.isCollidingPosition(tmp, viewport, isFarmer: true, 0, glider: false, this);
+ 				if (leftCorner && !rightCorner && !currentLocation.isCollidingPosition(nextPosition(1), viewport, isFarmer: true, 0, glider: false, this))
+ 				{
+-					position.X += (float)speed * ((float)time.ElapsedGameTime.Milliseconds / 64f);
++					position.X += (float)speed * ((float)Utility.ElapsedMs(time.ElapsedGameTime) / 64f);
+ 				}
+ 				else if (rightCorner && !leftCorner && !currentLocation.isCollidingPosition(nextPosition(3), viewport, isFarmer: true, 0, glider: false, this))
+ 				{
+-					position.X -= (float)speed * ((float)time.ElapsedGameTime.Milliseconds / 64f);
++					position.X -= (float)speed * ((float)Utility.ElapsedMs(time.ElapsedGameTime) / 64f);
+ 				}
+ 			}
+ 			else
+@@ -8498,11 +8802,11 @@ public class Farmer : Character, IComparable
+ 				bool bottomCorner = currentLocation.isCollidingPosition(tmp, viewport, isFarmer: true, 0, glider: false, this);
+ 				if (topCorner && !bottomCorner && !currentLocation.isCollidingPosition(nextPosition(2), viewport, isFarmer: true, 0, glider: false, this))
+ 				{
+-					position.Y += (float)speed * ((float)time.ElapsedGameTime.Milliseconds / 64f);
++					position.Y += (float)speed * ((float)Utility.ElapsedMs(time.ElapsedGameTime) / 64f);
+ 				}
+ 				else if (bottomCorner && !topCorner && !currentLocation.isCollidingPosition(nextPosition(0), viewport, isFarmer: true, 0, glider: false, this))
+ 				{
+-					position.Y -= (float)speed * ((float)time.ElapsedGameTime.Milliseconds / 64f);
++					position.Y -= (float)speed * ((float)Utility.ElapsedMs(time.ElapsedGameTime) / 64f);
+ 				}
+ 			}
+ 		}
+@@ -8513,7 +8817,7 @@ public class Farmer : Character, IComparable
+ 	{
+ 		if (_emoteGracePeriod > 0)
+ 		{
+-			_emoteGracePeriod -= time.ElapsedGameTime.Milliseconds;
++			_emoteGracePeriod -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 		}
+ 		if (isEmoteAnimating && (((IsLocalPlayer ? (movementDirections.Count > 0) : IsRemoteMoving()) && _emoteGracePeriod <= 0) || !FarmerSprite.PauseForSingleAnimation))
+ 		{
+@@ -8588,7 +8892,7 @@ public class Farmer : Character, IComparable
+ 			moveUp = IsRemoteMoving() && FacingDirection == 0;
+ 			moveDown = IsRemoteMoving() && FacingDirection == 2;
+ 			bool num = moveUp || moveRight || moveDown || moveLeft;
+-			float speed = position.CurrentInterpolationSpeed() / ((float)Game1.currentGameTime.ElapsedGameTime.Milliseconds * 0.066f);
++			float speed = position.CurrentInterpolationSpeed() / ((float)Utility.ElapsedMs(Game1.currentGameTime.ElapsedGameTime) * 0.066f);
+ 			running = Math.Abs(speed - 5f) < Math.Abs(speed - 2f) && !bathingClothes.Value && !onBridge.Value;
+ 			if (!num)
+ 			{

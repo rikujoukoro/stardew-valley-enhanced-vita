@@ -1,0 +1,74 @@
+diff --git a/StardewValley.Audio/SoundsHelper.cs b/StardewValley.Audio/SoundsHelper.cs
+index 817f7527f9a78c0d7d2bbfc3aef1a05c733a7925..fb9523b6ab3e5ddd58c75d469b0040f57cb4f511 100644
+--- a/StardewValley.Audio/SoundsHelper.cs
++++ b/StardewValley.Audio/SoundsHelper.cs
+@@ -33,6 +33,35 @@ public class SoundsHelper : ISoundsHelper
+ 		}
+ 	}
+ 
++	/// <summary>How many times one cue may start in a single update tick.</summary>
++	/// <remarks>
++	/// Port: cutting a patch of grass starts 'daggerswipe' once per weed in the same frame (10-20 times).
++	/// XACT honours the sound bank's instance limit by refusing the extra instances, so 3 play cleanly;
++	/// FAudio's limiting lets the instances replace each other within the frame and the result is
++	/// inaudible. Starting at most 3 per frame gives the XNA result on any audio backend.
++	/// </remarks>
++	public const int MaxSameCueStartsPerTick = 3;
++
++	private readonly System.Collections.Generic.Dictionary<string, int> _cueStartsThisTick = new System.Collections.Generic.Dictionary<string, int>();
++
++	private int _cueStartsTick = -1;
++
++	private bool TryCountSameFrameStart(string cueName)
++	{
++		if (_cueStartsTick != Game1.ticks)
++		{
++			_cueStartsTick = Game1.ticks;
++			_cueStartsThisTick.Clear();
++		}
++		_cueStartsThisTick.TryGetValue(cueName, out int starts);
++		if (starts >= MaxSameCueStartsPerTick)
++		{
++			return false;
++		}
++		_cueStartsThisTick[cueName] = starts + 1;
++		return true;
++	}
++
+ 	public virtual bool ShouldPlayLocal(SoundContext context)
+ 	{
+ 		if (context == SoundContext.NPC && Game1.eventUp)
+@@ -72,19 +101,31 @@ public class SoundsHelper : ISoundsHelper
+ 	{
+ 		try
+ 		{
+-			cue = Game1.soundBank.GetCue(cueName);
+-			SetPitch(cue, ((float?)pitch) ?? 1200f, pitch.HasValue);
++			// Port: the cue is created only for a sound that will play. The game created one for every
++			// sound, including those of other locations (volume 0); undisposed cues stay in FAudio's
++			// lists until the GC finalizes them, and FAudio walks those lists for every new cue and
++			// every engine update (on the Vita that was a tenth of the frame time).
+ 			if (!ShouldPlayLocal(context))
+ 			{
+ 				LogSound?.Invoke(cueName, location, position, pitch, 1f, context, "disabled for context");
++				cue = DummySoundBank.DummyCue;
+ 				return false;
+ 			}
+ 			float volume = GetVolumeForDistance(location, position);
+ 			if (volume <= 0f)
+ 			{
+ 				LogSound?.Invoke(cueName, location, position, pitch, volume, context, "disabled for distance");
++				cue = DummySoundBank.DummyCue;
+ 				return false;
+ 			}
++			if (!TryCountSameFrameStart(cueName))
++			{
++				LogSound?.Invoke(cueName, location, position, pitch, volume, context, "same cue started too often this frame");
++				cue = DummySoundBank.DummyCue;
++				return false;
++			}
++			cue = Game1.soundBank.GetCue(cueName);
++			SetPitch(cue, ((float?)pitch) ?? 1200f, pitch.HasValue);
+ 			cue.Play();
+ 			LogSound?.Invoke(cueName, location, position, pitch, volume, context, null);
+ 			return true;

@@ -1,0 +1,134 @@
+diff --git a/StardewValley.Menus/InventoryPage.cs b/StardewValley.Menus/InventoryPage.cs
+index c27fdf825f5cc0cdba9d6d85200d54a59d171198..3764a5ed5e0a63848870bdac586f34c00f15265e 100644
+--- a/StardewValley.Menus/InventoryPage.cs
++++ b/StardewValley.Menus/InventoryPage.cs
+@@ -153,6 +153,35 @@ public class InventoryPage : IClickableMenu
+ 				equipmentIcons.Add(trinket_slot);
+ 			}
+ 		}
++		if (VitaExtraRings.Enabled)
++		{
++			// Port: the Mods menu's three extra ring slots, in the column beside Shirt/Pants (below the trinket slot).
++			int[] rows = new int[3] { 320, 384, 448 };
++			int[] lefts = new int[3] { 108, 109, -99998 };
++			for (int i = 0; i < VitaExtraRings.Count; i++)
++			{
++				equipmentIcons.Add(new ClickableComponent(new Rectangle(xPositionOnScreen + 48 + 280, yPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 4 + rows[i] - 12, 64, 64), "VitaRing" + i)
++				{
++					myID = 130 + i,
++					upNeighborID = (i > 0) ? (129 + i) : (flag ? 120 : (Game1.player.MaxItems - 8)),
++					downNeighborID = (i < VitaExtraRings.Count - 1) ? (131 + i) : -1,
++					leftNeighborID = lefts[i],
++					rightNeighborID = 105,
++					fullyImmutable = true
++				});
++			}
++		}
++		if (VitaExtraRings.Enabled)
++		{
++			// Gamepad: Shirt -> first, Pants -> second extra slot, the trinket slot down into them, the trash can back left.
++			foreach (ClickableComponent c in equipmentIcons)
++			{
++				if (c.myID == 108) c.rightNeighborID = 130;
++				else if (c.myID == 109) c.rightNeighborID = 131;
++				else if (c.myID == 120) c.downNeighborID = 130;
++			}
++			trashCan.leftNeighborID = 130;
++		}
+ 		if (ShouldShowJunimoNoteIcon())
+ 		{
+ 			junimoNoteIcon = new ClickableTextureComponent("", new Rectangle(xPositionOnScreen + width, yPositionOnScreen + 96, 64, 64), "", Game1.content.LoadString("Strings\\UI:GameMenu_JunimoNote_Hover"), Game1.mouseCursors, new Rectangle(331, 374, 15, 14), 4f)
+@@ -294,6 +323,16 @@ public class InventoryPage : IClickableMenu
+ 			}
+ 			Item newItem = Utility.PerformSpecialItemPlaceReplacement(Game1.player.CursorSlotItem);
+ 			bool heldItemWasNull = newItem == null;
++			if (c.name.StartsWith("VitaRing"))
++			{
++				if (newItem == null || newItem is Ring)
++				{
++					Ring oldRing = VitaExtraRings.Swap(Game1.player, c.name[8] - '0', (Ring)newItem);
++					setHeldItem(Utility.PerformSpecialItemGrabReplacement(oldRing));
++					Game1.playSound(newItem != null ? "crit" : "dwop");
++				}
++				return;
++			}
+ 			switch (c.name)
+ 			{
+ 			case "Hat":
+@@ -623,6 +662,17 @@ public class InventoryPage : IClickableMenu
+ 		{
+ 			if (c.containsPoint(x, y))
+ 			{
++				if (c.name.StartsWith("VitaRing"))
++				{
++					Ring extraRing = VitaExtraRings.At(Game1.player, c.name[8] - '0');
++					if (extraRing != null)
++					{
++						hoveredItem = extraRing;
++						hoverText = extraRing.getDescription();
++						hoverTitle = extraRing.DisplayName;
++					}
++					continue;
++				}
+ 				switch (c.name)
+ 				{
+ 				case "Hat":
+@@ -761,6 +811,15 @@ public class InventoryPage : IClickableMenu
+ 		inventory.draw(b);
+ 		foreach (ClickableComponent c in equipmentIcons)
+ 		{
++			if (c.name.StartsWith("VitaRing"))
++			{
++				Ring extraRing = VitaExtraRings.At(Game1.player, c.name[8] - '0');
++				// Filled: the item slot (tile 10) like the vanilla ring slots. The ring is drawn at exactly 4x: at the hover
++				// size (4.4x) point sampling pulled the bottom row of the sprite above it in springobjects into view (the line).
++				b.Draw(Game1.menuTexture, c.bounds, Game1.getSourceRectForStandardTileSheet(Game1.menuTexture, (extraRing != null) ? 10 : 41), Color.White);
++				extraRing?.drawInMenu(b, new Vector2(c.bounds.X, c.bounds.Y), 1f);
++				continue;
++			}
+ 			switch (c.name)
+ 			{
+ 			case "Hat":
+@@ -856,12 +915,12 @@ public class InventoryPage : IClickableMenu
+ 		Utility.drawTextWithShadow(b, Game1.player.Name, Game1.dialogueFont, new Vector2((float)(xPositionOnScreen + 192 - 8) - Game1.dialogueFont.MeasureString(Game1.player.Name).X / 2f, yPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 448 + 8), Game1.textColor);
+ 		float offset = 32f;
+ 		string farmName = Game1.content.LoadString("Strings\\UI:Inventory_FarmName", Game1.player.farmName);
+-		Utility.drawTextWithShadow(b, farmName, Game1.dialogueFont, new Vector2((float)xPositionOnScreen + offset + 512f + 32f - Game1.dialogueFont.MeasureString(farmName).X / 2f, yPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 256 + 4), Game1.textColor);
++		VitaDrawStat(b, farmName, yPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 256 + 4, Game1.textColor);
+ 		string currentFunds = Game1.content.LoadString("Strings\\UI:Inventory_CurrentFunds" + (Game1.player.useSeparateWallets ? "_Separate" : ""), Utility.getNumberWithCommas(Game1.player.Money));
+-		Utility.drawTextWithShadow(b, currentFunds, Game1.dialogueFont, new Vector2((float)xPositionOnScreen + offset + 512f + 32f - Game1.dialogueFont.MeasureString(currentFunds).X / 2f, yPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 320 + 4), Game1.textColor);
++		VitaDrawStat(b, currentFunds, yPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 320 + 4, Game1.textColor);
+ 		string totalEarnings = Game1.content.LoadString("Strings\\UI:Inventory_TotalEarnings" + (Game1.player.useSeparateWallets ? "_Separate" : ""), Utility.getNumberWithCommas((int)Game1.player.totalMoneyEarned));
+-		Utility.drawTextWithShadow(b, totalEarnings, Game1.dialogueFont, new Vector2((float)xPositionOnScreen + offset + 512f + 32f - Game1.dialogueFont.MeasureString(totalEarnings).X / 2f, yPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 384), Game1.textColor);
+-		Utility.drawTextWithShadow(b, Utility.getDateString(), Game1.dialogueFont, new Vector2((float)xPositionOnScreen + offset + 512f + 32f - Game1.dialogueFont.MeasureString(Utility.getDateString()).X / 2f, yPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 448), Game1.textColor * 0.8f);
++		VitaDrawStat(b, totalEarnings, yPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 384, Game1.textColor);
++		VitaDrawStat(b, Utility.getDateString(), yPositionOnScreen + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 448, Game1.textColor * 0.8f);
+ 		organizeButton?.draw(b);
+ 		trashCan.draw(b);
+ 		b.Draw(Game1.mouseCursors, new Vector2(trashCan.bounds.X + 60, trashCan.bounds.Y + 40), new Rectangle(564 + Game1.player.trashCanLevel * 18, 129, 18, 10), Color.White, trashCanLidRotation, new Vector2(16f, 10f), 4f, SpriteEffects.None, 0.86f);
+@@ -883,6 +942,25 @@ public class InventoryPage : IClickableMenu
+ 		junimoNoteIcon?.draw(b);
+ 	}
+ 
++	/// <summary>
++	/// The farm name, money and date lines, centred where vanilla puts them. With the extra ring column (x+328..392) they
++	/// would run over the slots: then they are centred further right and shrunk to fit between that column and the edge.
++	/// </summary>
++	private void VitaDrawStat(SpriteBatch b, string text, float y, Color color)
++	{
++		float width = Game1.dialogueFont.MeasureString(text).X;
++		float center = xPositionOnScreen + 32f + 512f + 32f;
++		float scale = 1f;
++		if (VitaExtraRings.Enabled)
++		{
++			float left = xPositionOnScreen + 48 + 280 + 64 + 16;
++			float right = trashCan.bounds.X - 8;
++			center = (left + right) / 2f;
++			scale = Math.Min(1f, (right - left) / Math.Max(1f, width));
++		}
++		Utility.drawTextWithShadow(b, text, Game1.dialogueFont, new Vector2(center - width * scale / 2f, y + (1f - scale) * Game1.dialogueFont.LineSpacing / 2f), color, scale);
++	}
++
+ 	public override void emergencyShutDown()
+ 	{
+ 		base.emergencyShutDown();

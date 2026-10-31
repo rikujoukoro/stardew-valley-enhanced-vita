@@ -1,0 +1,27 @@
+diff --git a/Netcode/NetVersion.cs b/Netcode/NetVersion.cs
+index d4c58b9d5e84ee793431f7d4e6819ae7d6f1625d..5f10d24b625e6ca48b8d02d5bd0b39efa059e0d9 100644
+--- a/Netcode/NetVersion.cs
++++ b/Netcode/NetVersion.cs
+@@ -24,11 +24,11 @@ public struct NetVersion : IEquatable<NetVersion>
+ 	{
+ 		get
+ 		{
+-			if (peerId >= vector.Count)
++			if (_vector == null || peerId >= _vector.Count)
+ 			{
+ 				return 0u;
+ 			}
+-			return vector[peerId];
++			return _vector[peerId];
+ 		}
+ 		set
+ 		{
+@@ -47,7 +47,7 @@ public struct NetVersion : IEquatable<NetVersion>
+ 
+ 	public int Size()
+ 	{
+-		return vector.Count;
++		return _vector == null ? 0 : _vector.Count;
+ 	}
+ 
+ 	public void Set(NetVersion other)

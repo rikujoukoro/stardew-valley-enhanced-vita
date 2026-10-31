@@ -1,0 +1,34 @@
+diff --git a/StardewValley.Menus/LanguageSelectionMenu.cs b/StardewValley.Menus/LanguageSelectionMenu.cs
+index 8e21d083fb73facd20ba2331bd41bf12e2d36a21..2e442568fd4f4201337747da6d8e2159cc20e003 100644
+--- a/StardewValley.Menus/LanguageSelectionMenu.cs
++++ b/StardewValley.Menus/LanguageSelectionMenu.cs
+@@ -185,6 +185,7 @@ public class LanguageSelectionMenu : IClickableMenu
+ 
+ 	public virtual void ApplyLanguage(LanguageEntry entry)
+ 	{
++		LocalizedContentManager.LanguageCode oldLang = LocalizedContentManager.CurrentLanguageCode;
+ 		if (entry.ModLanguage != null)
+ 		{
+ 			LocalizedContentManager.SetModLanguage(entry.ModLanguage);
+@@ -193,6 +194,21 @@ public class LanguageSelectionMenu : IClickableMenu
+ 		{
+ 			LocalizedContentManager.CurrentLanguageCode = entry.LanguageCode;
+ 		}
++		if (VitaPlatform.IsVita && oldLang != LocalizedContentManager.CurrentLanguageCode)
++		{
++			try
++			{
++				StartupPreferences preferences = new StartupPreferences();
++				preferences.loadPreferences(async: false, applyLanguage: false);
++				preferences.savePreferences(async: false, update_language_from_ingame_language: true);
++			}
++			catch
++			{
++			}
++			VitaLanguageRestartDialog dialog = new VitaLanguageRestartDialog();
++			if (Game1.activeClickableMenu is TitleMenu) TitleMenu.subMenu = dialog;
++			else Game1.activeClickableMenu = dialog;
++		}
+ 	}
+ 
+ 	public override void performHoverAction(int x, int y)

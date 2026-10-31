@@ -1,0 +1,300 @@
+--- a/src/Graphics/SpriteBatch.cs
++++ b/src/Graphics/SpriteBatch.cs
+@@ -93,9 +93,19 @@
+ 
+ 		// Local data stored before buffering to GPU
+ 		private SpriteInfo[] spriteInfos;
+-		private IntPtr[] sortedSpriteInfos; // SpriteInfo*[]
++		/* Vita port: sort scratch (radix keys + sprite indices) replaces the IntPtr[] + Array.Sort(keys, items, IComparer)
++		 * path; allocated lazily only for non-Deferred modes, sized to numSprites. */
++		private uint[] sortKeys;
++		private uint[] sortKeysTmp;
++		private int[] sortOrder;
++		private int[] sortOrderTmp;
+ 		private VertexPositionColorTexture4[] vertexInfo;
+-		private Texture2D[] textureInfo;
++		// Vita port: struct wrapper so stores skip the covariant array-store check (virt_stelemref_class_small_idepth).
++		private struct TexRef
++		{
++			public Texture2D tex;
++		}
++		private TexRef[] textureInfo;
+ 
+ 		// Default SpriteBatch Effect
+ 		private Effect spriteEffect;
+@@ -155,9 +165,8 @@
+ 			base.graphicsDevice = graphicsDevice;
+ 
+ 			vertexInfo = new VertexPositionColorTexture4[MAX_SPRITES];
+-			textureInfo = new Texture2D[MAX_SPRITES];
++			textureInfo = new TexRef[MAX_SPRITES];
+ 			spriteInfos = new SpriteInfo[MAX_SPRITES];
+-			sortedSpriteInfos = new IntPtr[MAX_SPRITES];
+ 			vertexBuffer = new DynamicVertexBuffer(
+ 				graphicsDevice,
+ 				VertexPositionColorTexture.VertexDeclaration,
+@@ -1128,7 +1137,6 @@
+ 					Array.Resize(ref vertexInfo, newMax);
+ 					Array.Resize(ref textureInfo, newMax);
+ 					Array.Resize(ref spriteInfos, newMax);
+-					Array.Resize(ref sortedSpriteInfos, newMax);
+ 				}
+ 			}
+ 
+@@ -1205,7 +1213,7 @@
+ 					);
+ 				}
+ 
+-				textureInfo[numSprites] = texture;
++				textureInfo[numSprites].tex = texture;
+ 				numSprites += 1;
+ 			}
+ 			else
+@@ -1230,7 +1238,7 @@
+ 					spriteInfo->effects = effects;
+ 				}
+ 
+-				textureInfo[numSprites] = texture;
++				textureInfo[numSprites].tex = texture;
+ 				numSprites += 1;
+ 			}
+ 		}
+@@ -1245,39 +1253,100 @@
+ 				return;
+ 			}
+ 
++			int[] order = null;
+ 			if (sortMode != SpriteSortMode.Deferred)
+ 			{
+-				IComparer<IntPtr> comparer;
+-				if (sortMode == SpriteSortMode.Texture)
+-				{
+-					comparer = TextureCompare;
+-				}
+-				else if (sortMode == SpriteSortMode.BackToFront)
++				/* Vita port: stable LSD radix sort on (key, submission index) replaces Array.Sort with an
++				 * IComparer. Key maps are monotone with the old comparers (float.CompareTo / int.CompareTo,
++				 * descending for BackToFront), ties keep submission order exactly like fna-stable-sprite-sort.patch.
++				 * Textures are no longer permuted; they are read through the order array. */
++				int n = numSprites;
++				if (sortKeys == null || sortKeys.Length < n)
++				{
++					sortKeys = new uint[n];
++					sortKeysTmp = new uint[n];
++					sortOrder = new int[n];
++					sortOrderTmp = new int[n];
++				}
++				uint[] keys = sortKeys;
++				uint[] keysTmp = sortKeysTmp;
++				int[] ord = sortOrder;
++				int[] ordTmp = sortOrderTmp;
++				SpriteSortMode mode = sortMode;
++				fixed (SpriteInfo* spriteInfo = &spriteInfos[0])
+ 				{
+-					comparer = BackToFrontCompare;
++					for (int i = 0; i < n; i += 1)
++					{
++						uint k;
++						if (mode == SpriteSortMode.Texture)
++						{
++							k = (uint) spriteInfo[i].textureHash ^ 0x80000000u;
++						}
++						else
++						{
++							float d = spriteInfo[i].depth;
++							if (d != d)
++							{
++								k = 0; // NaN sorts below everything, equal to itself
++							}
++							else
++							{
++								if (d == 0.0f)
++								{
++									d = 0.0f; // -0 == +0
++								}
++								int bits = *(int*) &d;
++								k = (uint) (bits < 0 ? ~bits : bits | int.MinValue);
++								// k >= 1 for non-NaN, so NaN (0) is the minimum
++							}
++							if (mode == SpriteSortMode.BackToFront)
++							{
++								k = ~k; // descending depth
++							}
++						}
++						keys[i] = k;
++						ord[i] = i;
++					}
+ 				}
+-				else
++				int* counts = stackalloc int[256];
++				for (int shift = 0; shift < 32; shift += 8)
+ 				{
+-					comparer = FrontToBackCompare;
++					for (int i = 0; i < 256; i += 1)
++					{
++						counts[i] = 0;
++					}
++					for (int i = 0; i < n; i += 1)
++					{
++						counts[(keys[i] >> shift) & 0xFF] += 1;
++					}
++					if (counts[(keys[0] >> shift) & 0xFF] == n)
++					{
++						continue; // all keys share this byte
++					}
++					int sum = 0;
++					for (int i = 0; i < 256; i += 1)
++					{
++						int c = counts[i];
++						counts[i] = sum;
++						sum += c;
++					}
++					for (int i = 0; i < n; i += 1)
++					{
++						uint k = keys[i];
++						int dst = counts[(k >> shift) & 0xFF]++;
++						keysTmp[dst] = k;
++						ordTmp[dst] = ord[i];
++					}
++					uint[] tk = keys; keys = keysTmp; keysTmp = tk;
++					int[] to = ord; ord = ordTmp; ordTmp = to;
+ 				}
+-				fixed (SpriteInfo* spriteInfo = &spriteInfos[0]) {
+-				fixed (IntPtr* sortedSpriteInfo = &sortedSpriteInfos[0]) {
++				order = ord;
++				fixed (SpriteInfo* spriteInfo2 = &spriteInfos[0])
+ 				fixed (VertexPositionColorTexture4* sprites = &vertexInfo[0])
+ 				{
+-					for (int i = 0; i < numSprites; i += 1)
+-					{
+-						sortedSpriteInfo[i] = (IntPtr) (&spriteInfo[i]);
+-					}
+-					Array.Sort(
+-						sortedSpriteInfos,
+-						textureInfo,
+-						0,
+-						numSprites,
+-						comparer
+-					);
+-					for (int i = 0; i < numSprites; i += 1)
++					for (int i = 0; i < n; i += 1)
+ 					{
+-						SpriteInfo* info = (SpriteInfo*) sortedSpriteInfo[i];
++						SpriteInfo* info = &spriteInfo2[ord[i]];
+ 						GenerateVertexInfo(
+ 							&sprites[i],
+ 							info->sourceX,
+@@ -1297,24 +1366,41 @@
+ 							info->effects
+ 						);
+ 					}
+-				}}}
++				}
+ 			}
+ 
++			TexRef[] texInfo = textureInfo;
+ 			int arrayOffset = 0;
+ 		nextbatch:
+ 			int batchSize = Math.Min(numSprites, MAX_SPRITES);
+ 			int baseOff = UpdateVertexBuffer(arrayOffset, batchSize);
+ 			int offset = 0;
+ 
+-			Texture2D curTexture = textureInfo[arrayOffset];
+-			for (int i = 1; i < batchSize; i += 1)
++			Texture2D curTexture = order != null ? texInfo[order[arrayOffset]].tex : texInfo[arrayOffset].tex;
++			if (order != null)
+ 			{
+-				Texture2D tex = textureInfo[arrayOffset + i];
+-				if (tex != curTexture)
++				for (int i = 1; i < batchSize; i += 1)
+ 				{
+-					DrawPrimitives(curTexture, baseOff + offset, i - offset);
+-					curTexture = tex;
+-					offset = i;
++					Texture2D tex = texInfo[order[arrayOffset + i]].tex;
++					if (tex != curTexture)
++					{
++						DrawPrimitives(curTexture, baseOff + offset, i - offset);
++						curTexture = tex;
++						offset = i;
++					}
++				}
++			}
++			else
++			{
++				for (int i = 1; i < batchSize; i += 1)
++				{
++					Texture2D tex = texInfo[arrayOffset + i].tex;
++					if (tex != curTexture)
++					{
++						DrawPrimitives(curTexture, baseOff + offset, i - offset);
++						curTexture = tex;
++						offset = i;
++					}
+ 				}
+ 			}
+ 			DrawPrimitives(curTexture, baseOff + offset, batchSize - offset);
+--- a/src/Graphics/GraphicsDevice.cs
++++ b/src/Graphics/GraphicsDevice.cs
+@@ -382,8 +382,8 @@
+ 
+ 		#region Internal Sampler Change Queue
+ 
+-		private readonly bool[] modifiedSamplers = new bool[MAX_TEXTURE_SAMPLERS];
+-		private readonly bool[] modifiedVertexSamplers = new bool[MAX_VERTEXTEXTURE_SAMPLERS];
++		private readonly bool[] modifiedSamplers = new bool[MAX_TEXTURE_SAMPLERS + 1]; // Vita port: last slot = 'any sampler dirty' flag, lets ApplySamplers early-out per draw
++		private readonly bool[] modifiedVertexSamplers = new bool[MAX_VERTEXTEXTURE_SAMPLERS + 1]; // Vita port: last slot = 'any dirty' flag
+ 
+ 		#endregion
+ 
+@@ -2064,7 +2064,13 @@
+ 
+ 		private void ApplySamplers()
+ 		{
+-			for (int sampler = 0; sampler < modifiedSamplers.Length; sampler += 1)
++			// Vita port: skip both 16/4-slot scans when nothing changed since the last draw (flag set by the collections' setters).
++			bool[] modS = modifiedSamplers;
++			bool[] modV = modifiedVertexSamplers;
++			if (modS[modS.Length - 1])
++			{
++				modS[modS.Length - 1] = false;
++			for (int sampler = 0; sampler < modS.Length - 1; sampler += 1)
+ 			{
+ 				if (!modifiedSamplers[sampler])
+ 				{
+@@ -2082,8 +2088,14 @@
+ 					ref SamplerStates[sampler].state
+ 				);
+ 			}
++			}
+ 
+-			for (int sampler = 0; sampler < modifiedVertexSamplers.Length; sampler += 1) 
++			if (!modV[modV.Length - 1])
++			{
++				return;
++			}
++			modV[modV.Length - 1] = false;
++			for (int sampler = 0; sampler < modV.Length - 1; sampler += 1) 
+ 			{
+ 				if (!modifiedVertexSamplers[sampler])
+ 				{
+--- a/src/Graphics/TextureCollection.cs
++++ b/src/Graphics/TextureCollection.cs
+@@ -56,6 +56,7 @@
+ 				}
+ 				textures[index] = value;
+ 				modifiedSamplers[index] = true;
++				modifiedSamplers[modifiedSamplers.Length - 1] = true; // Vita port: any-dirty flag
+ 			}
+ 		}
+ 
+--- a/src/Graphics/SamplerStateCollection.cs
++++ b/src/Graphics/SamplerStateCollection.cs
+@@ -40,6 +40,7 @@
+ 				value.graphicsDevice = pDevice;
+ 				samplers[index] = value;
+ 				modifiedSamplers[index] = true;
++				modifiedSamplers[modifiedSamplers.Length - 1] = true; // Vita port: any-dirty flag
+ 			}
+ 		}
+ 

@@ -1,0 +1,193 @@
+diff --git a/StardewValley.Menus/LoadGameMenu.cs b/StardewValley.Menus/LoadGameMenu.cs
+index 65fa5d74d2fdb01f85185b8c15fa70ec17b29462..5f779f38813a3d74cb8f4b823c04a69d43eb1d1a 100644
+--- a/StardewValley.Menus/LoadGameMenu.cs
++++ b/StardewValley.Menus/LoadGameMenu.cs
+@@ -47,6 +47,24 @@ public class LoadGameMenu : IClickableMenu, IDisposable
+ 
+ 		public int versionComparison;
+ 
++		private int _cachedSlotNumberValue = -1;
++
++		private string _cachedSlotNumberLabel;
++
++		private int _cachedSlotNumberHalfWidth;
++
++		private string _cachedDateString;
++
++		private string _cachedSubName;
++
++		private float _cachedSubNameWidth;
++
++		private string _cachedCashText;
++
++		private int _cachedMoneyWidth;
++
++		private string _cachedTimerText;
++
+ 		public SaveFileSlot(LoadGameMenu menu, Farmer farmer, int? slotNumber)
+ 			: base(menu)
+ 		{
+@@ -66,8 +84,14 @@ public class LoadGameMenu : IClickableMenu, IDisposable
+ 		{
+ 			MenuSlot menuSlot = menu.MenuSlots[menu.currentItemIndex + i];
+ 			ClickableComponent button = menu.slotButtons[i];
+-			string slotNumberLabel = ((menuSlot as SaveFileSlot)?.SlotNumber ?? (menu.currentItemIndex + i + 1)) + ".";
+-			SpriteText.drawString(b, slotNumberLabel, button.bounds.X + 28 + 32 - SpriteText.getWidthOfString(slotNumberLabel) / 2, button.bounds.Y + 36);
++			int num = (menuSlot as SaveFileSlot)?.SlotNumber ?? (menu.currentItemIndex + i + 1);
++			if (_cachedSlotNumberValue != num || _cachedSlotNumberLabel == null)
++			{
++				_cachedSlotNumberValue = num;
++				_cachedSlotNumberLabel = num + ".";
++				_cachedSlotNumberHalfWidth = SpriteText.getWidthOfString(_cachedSlotNumberLabel) / 2;
++			}
++			SpriteText.drawString(b, _cachedSlotNumberLabel, button.bounds.X + 28 + 32 - _cachedSlotNumberHalfWidth, button.bounds.Y + 36);
+ 		}
+ 
+ 		protected virtual string slotName()
+@@ -106,36 +130,49 @@ public class LoadGameMenu : IClickableMenu, IDisposable
+ 
+ 		protected virtual void drawSlotDate(SpriteBatch b, int i)
+ 		{
+-			string dateStringForSaveGame = ((!Farmer.dayOfMonthForSaveGame.HasValue || !Farmer.seasonForSaveGame.HasValue || !Farmer.yearForSaveGame.HasValue) ? Farmer.dateStringForSaveGame : Utility.getDateStringFor(Farmer.dayOfMonthForSaveGame.Value, Farmer.seasonForSaveGame.Value, Farmer.yearForSaveGame.Value));
+-			Utility.drawTextWithShadow(b, dateStringForSaveGame, Game1.dialogueFont, new Vector2(menu.slotButtons[i].bounds.X + 128 + 32, menu.slotButtons[i].bounds.Y + 64 + 40), Game1.textColor * getSlotAlpha());
++			if (_cachedDateString == null)
++			{
++				_cachedDateString = ((!Farmer.dayOfMonthForSaveGame.HasValue || !Farmer.seasonForSaveGame.HasValue || !Farmer.yearForSaveGame.HasValue) ? Farmer.dateStringForSaveGame : Utility.getDateStringFor(Farmer.dayOfMonthForSaveGame.Value, Farmer.seasonForSaveGame.Value, Farmer.yearForSaveGame.Value));
++			}
++			Utility.drawTextWithShadow(b, _cachedDateString, Game1.dialogueFont, new Vector2(menu.slotButtons[i].bounds.X + 128 + 32, menu.slotButtons[i].bounds.Y + 64 + 40), Game1.textColor * getSlotAlpha());
+ 		}
+ 
+ 		protected virtual string slotSubName()
+ 		{
+-			return Game1.content.LoadString("Strings\\StringsFromCSFiles:LoadGameMenu.cs.11019", Farmer.farmName);
++			if (_cachedSubName == null)
++			{
++				_cachedSubName = Game1.content.LoadString("Strings\\StringsFromCSFiles:LoadGameMenu.cs.11019", Farmer.farmName);
++				_cachedSubNameWidth = Game1.dialogueFont.MeasureString(_cachedSubName).X;
++			}
++			return _cachedSubName;
+ 		}
+ 
+ 		protected virtual void drawSlotSubName(SpriteBatch b, int i)
+ 		{
+ 			string subName = slotSubName();
+-			Utility.drawTextWithShadow(b, subName, Game1.dialogueFont, new Vector2((float)(menu.slotButtons[i].bounds.X + menu.width - 128) - Game1.dialogueFont.MeasureString(subName).X, menu.slotButtons[i].bounds.Y + 44), Game1.textColor * getSlotAlpha());
++			Utility.drawTextWithShadow(b, subName, Game1.dialogueFont, new Vector2((float)(menu.slotButtons[i].bounds.X + menu.width - 128) - _cachedSubNameWidth, menu.slotButtons[i].bounds.Y + 44), Game1.textColor * getSlotAlpha());
+ 		}
+ 
+ 		protected virtual void drawSlotMoney(SpriteBatch b, int i)
+ 		{
+-			string cashText = Game1.content.LoadString("Strings\\StringsFromCSFiles:LoadGameMenu.cs.11020", Utility.getNumberWithCommas(Farmer.Money));
+-			if (Farmer.Money == 1 && LocalizedContentManager.CurrentLanguageCode == LocalizedContentManager.LanguageCode.pt)
++			if (_cachedCashText == null)
+ 			{
+-				cashText = cashText.Substring(0, cashText.Length - 1);
++				string cashText = Game1.content.LoadString("Strings\\StringsFromCSFiles:LoadGameMenu.cs.11020", Utility.getNumberWithCommas(Farmer.Money));
++				if (Farmer.Money == 1 && LocalizedContentManager.CurrentLanguageCode == LocalizedContentManager.LanguageCode.pt)
++				{
++					cashText = cashText.Substring(0, cashText.Length - 1);
++				}
++				_cachedCashText = cashText;
++				_cachedMoneyWidth = (int)Game1.dialogueFont.MeasureString(cashText).X;
+ 			}
+-			int moneyWidth = (int)Game1.dialogueFont.MeasureString(cashText).X;
++			int moneyWidth = _cachedMoneyWidth;
+ 			Utility.drawWithShadow(b, Game1.mouseCursors, new Vector2(menu.slotButtons[i].bounds.X + menu.width - 192 - 100 - moneyWidth, menu.slotButtons[i].bounds.Y + 64 + 44), new Rectangle(193, 373, 9, 9), Color.White, 0f, Vector2.Zero, 4f, flipped: false, 1f);
+ 			Vector2 position = new Vector2(menu.slotButtons[i].bounds.X + menu.width - 192 - 60 - moneyWidth, menu.slotButtons[i].bounds.Y + 64 + 44);
+ 			if (LocalizedContentManager.CurrentLanguageCode != LocalizedContentManager.LanguageCode.en)
+ 			{
+ 				position.Y += 5f;
+ 			}
+-			Utility.drawTextWithShadow(b, cashText, Game1.dialogueFont, position, Game1.textColor * getSlotAlpha());
++			Utility.drawTextWithShadow(b, _cachedCashText, Game1.dialogueFont, position, Game1.textColor * getSlotAlpha());
+ 		}
+ 
+ 		protected virtual void drawSlotTimer(SpriteBatch b, int i)
+@@ -146,7 +183,11 @@ public class LoadGameMenu : IClickableMenu, IDisposable
+ 			{
+ 				position.Y += 5f;
+ 			}
+-			Utility.drawTextWithShadow(b, Utility.getHoursMinutesStringFromMilliseconds(Farmer.millisecondsPlayed), Game1.dialogueFont, position, Game1.textColor * getSlotAlpha());
++			if (_cachedTimerText == null)
++			{
++				_cachedTimerText = Utility.getHoursMinutesStringFromMilliseconds(Farmer.millisecondsPlayed);
++			}
++			Utility.drawTextWithShadow(b, _cachedTimerText, Game1.dialogueFont, position, Game1.textColor * getSlotAlpha());
+ 		}
+ 
+ 		public virtual void drawVersionMismatchSlot(SpriteBatch b, int i)
+@@ -185,7 +226,7 @@ public class LoadGameMenu : IClickableMenu, IDisposable
+ 			drawSlotTimer(b, i);
+ 		}
+ 
+-		public new void Dispose()
++		public override void Dispose()
+ 		{
+ 			Farmer.unload();
+ 		}
+@@ -289,8 +330,20 @@ public class LoadGameMenu : IClickableMenu, IDisposable
+ 		return false;
+ 	}
+ 
++	/// <summary>Port: the menu's left edge on the Vita. The scroll arrows and bar sit 16 px right of the frame and are 44 px wide, so the whole group (frame + 60 px) is centered in the UI viewport (1280 px wide at the Vita's UI scale) with the same margin on both sides; the PC centering put the arrows 2 px past the right edge.</summary>
++	private static int VitaMenuX(int menuWidth)
++	{
++		return Math.Max(0, (Game1.uiViewport.Width - (menuWidth + 16 + 44)) / 2);
++	}
++
++	/// <summary>Port: the menu's top edge on the Vita. The frame is drawn 32 px taller than the menu's height, so that is what gets centered (the PC constructor left the frame 1 px past the bottom of the 726 px UI viewport).</summary>
++	private static int VitaMenuY(int menuHeight)
++	{
++		return Math.Max(0, (Game1.uiViewport.Height - (menuHeight + 32)) / 2);
++	}
++
+ 	public LoadGameMenu(string filter = null)
+-		: base(Game1.uiViewport.Width / 2 - (1100 + IClickableMenu.borderWidth * 2) / 2, Game1.uiViewport.Height / 2 - (600 + IClickableMenu.borderWidth * 2) / 2, 1100 + IClickableMenu.borderWidth * 2, 600 + IClickableMenu.borderWidth * 2)
++		: base(VitaPlatform.IsVita ? VitaMenuX(1100 + IClickableMenu.borderWidth * 2) : (Game1.uiViewport.Width / 2 - (1100 + IClickableMenu.borderWidth * 2) / 2), VitaPlatform.IsVita ? VitaMenuY(600 + IClickableMenu.borderWidth * 2) : (Game1.uiViewport.Height / 2 - (600 + IClickableMenu.borderWidth * 2) / 2), 1100 + IClickableMenu.borderWidth * 2, 600 + IClickableMenu.borderWidth * 2)
+ 	{
+ 		backButton = new ClickableComponent(new Rectangle(Game1.uiViewport.Width + -66 * TitleMenu.pixelZoom - 8 * TitleMenu.pixelZoom * 2, Game1.uiViewport.Height - 27 * TitleMenu.pixelZoom - 8 * TitleMenu.pixelZoom, 66 * TitleMenu.pixelZoom, 27 * TitleMenu.pixelZoom), "")
+ 		{
+@@ -298,7 +351,9 @@ public class LoadGameMenu : IClickableMenu, IDisposable
+ 			upNeighborID = -99998,
+ 			leftNeighborID = -99998,
+ 			rightNeighborID = -99998,
+-			downNeighborID = -99998
++			downNeighborID = -99998,
++			// Port: TitleMenu doesn't draw the Back button over the save list on the Vita (Circle goes back), so the cursor can't land on it.
++			visible = !VitaPlatform.IsVita
+ 		};
+ 		upArrow = new ClickableTextureComponent(new Rectangle(xPositionOnScreen + width + 16, yPositionOnScreen + 16, 44, 48), Game1.mouseCursors, new Rectangle(421, 459, 11, 12), 4f)
+ 		{
+@@ -423,6 +478,10 @@ public class LoadGameMenu : IClickableMenu, IDisposable
+ 			Farmer file = files[i];
+ 			if (file != null)
+ 			{
++				if (VitaPlatform.IsVita)
++				{
++					file.FarmerRenderer?.PrewarmForMenu(file);
++				}
+ 				MenuSlots.Add(new SaveFileSlot(this, file, startNumbersAt + i));
+ 			}
+ 		}
+@@ -503,7 +562,7 @@ public class LoadGameMenu : IClickableMenu, IDisposable
+ 		{
+ 			try
+ 			{
+-				using FileStream stream = File.OpenRead(path);
++				using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536);
+ 				reference = null;
+ 				return load(stream);
+ 			}
+@@ -570,6 +629,12 @@ public class LoadGameMenu : IClickableMenu, IDisposable
+ 	{
+ 		xPositionOnScreen = (newBounds.Width - width) / 2;
+ 		yPositionOnScreen = (newBounds.Height - (height + 32)) / 2;
++		if (VitaPlatform.IsVita)
++		{
++			// Port: same placement as the constructor (frame and scroll arrows centered in the UI viewport).
++			xPositionOnScreen = VitaMenuX(width);
++			yPositionOnScreen = VitaMenuY(height);
++		}
+ 		backButton.bounds.X = Game1.uiViewport.Width + -66 * TitleMenu.pixelZoom - 8 * TitleMenu.pixelZoom * 2;
+ 		backButton.bounds.Y = Game1.uiViewport.Height - 27 * TitleMenu.pixelZoom - 8 * TitleMenu.pixelZoom;
+ 		upArrow.bounds.X = xPositionOnScreen + width + 16;

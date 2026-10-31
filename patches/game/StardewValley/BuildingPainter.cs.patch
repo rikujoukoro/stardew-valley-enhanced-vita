@@ -1,0 +1,26 @@
+diff --git a/StardewValley/BuildingPainter.cs b/StardewValley/BuildingPainter.cs
+index c4652b26de07044ad62821376cba10d2c2e38810..673050fbd28cf9d4da7805bb86dfa0b6c4c6bfd4 100644
+--- a/StardewValley/BuildingPainter.cs
++++ b/StardewValley/BuildingPainter.cs
+@@ -15,6 +15,10 @@ public class BuildingPainter
+ 
+ 	public static Texture2D Apply(Texture2D base_texture, string mask_path, BuildingPaintColor color)
+ 	{
++		if (!color.RequiresRecolor())
++		{
++			return null;
++		}
+ 		if (!paintMaskLookup.TryGetValue(mask_path, out var paint_indices))
+ 		{
+ 			try
+@@ -53,10 +57,6 @@ public class BuildingPainter
+ 		{
+ 			return null;
+ 		}
+-		if (!color.RequiresRecolor())
+-		{
+-			return null;
+-		}
+ 		Color[] painted_pixels = new Color[base_texture.GetElementCount()];
+ 		base_texture.GetData(painted_pixels);
+ 		Texture2D paintedTexture = new Texture2D(Game1.graphics.GraphicsDevice, base_texture.GetActualWidth(), base_texture.GetActualHeight())

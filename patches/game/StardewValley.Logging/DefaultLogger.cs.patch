@@ -1,0 +1,39 @@
+diff --git a/StardewValley.Logging/DefaultLogger.cs b/StardewValley.Logging/DefaultLogger.cs
+index 066de68077644ee08d7ecb5a408bb4fcd47f91da..804b0156ad7b0cb44fb4cb6eb6b55acb8c55b6ea 100644
+--- a/StardewValley.Logging/DefaultLogger.cs
++++ b/StardewValley.Logging/DefaultLogger.cs
+@@ -65,6 +65,11 @@ internal class DefaultLogger : IGameLogger
+ 
+ 	private void WriteMessageToFile(string message)
+ 	{
++		if (VitaPlatform.IsVita)
++		{
++			// Vita logs are routed to the bounded native console ring by LogImpl.
++			return;
++		}
+ 		if (LogPath == null)
+ 		{
+ 			return;
+@@ -73,7 +78,8 @@ internal class DefaultLogger : IGameLogger
+ 		{
+ 			File.WriteAllText(LogPath, message);
+ 			StartedLogFile = true;
+-			Game1.log.Verbose($"Starting log file at {DateTime.Now:yyyy-MM-dd HH:mm:ii}.");
++			// The first write happens in the constructor, before Game1.log refers to this logger.
++			Verbose($"Starting log file at {DateTime.Now:yyyy-MM-dd HH:mm:ii}.");
+ 			return;
+ 		}
+ 		try
+@@ -93,6 +99,12 @@ internal class DefaultLogger : IGameLogger
+ 	{
+ 		bool logToConsole = ShouldWriteToConsole;
+ 		bool logToFile = ShouldWriteToLogFile;
++		if (VitaPlatform.IsVita && logToFile)
++		{
++			// Keep warnings/errors, but never open/flush the card per network message.
++			logToConsole = true;
++			logToFile = false;
++		}
+ 		if (logToConsole | logToFile)
+ 		{
+ 			message = FormatLog(level, message, exception);

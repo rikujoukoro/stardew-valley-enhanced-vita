@@ -1,0 +1,69 @@
+diff --git a/StardewValley.Objects/Ring.cs b/StardewValley.Objects/Ring.cs
+index 69cf53084129982fd115f1b37f25a49a68a48c91..3cfd0585e13d8b3ff489bcbf677354e4e0fa871b 100644
+--- a/StardewValley.Objects/Ring.cs
++++ b/StardewValley.Objects/Ring.cs
+@@ -98,6 +98,10 @@ public class Ring : Item
+ 	{
+ 		get
+ 		{
++			if (VitaTractorMod.IsKit(this))
++			{
++				return VitaTractorMod.KitName;
++			}
+ 			if (displayName == null)
+ 			{
+ 				loadDisplayFields();
+@@ -323,8 +327,17 @@ public class Ring : Item
+ 	public override void drawInMenu(SpriteBatch spriteBatch, Vector2 location, float scaleSize, float transparency, float layerDepth, StackDrawType drawStackNumber, Color color, bool drawShadow)
+ 	{
+ 		AdjustMenuDrawForRecipes(ref transparency, ref scaleSize);
+-		ParsedItemData itemData = ItemRegistry.GetDataOrErrorItem(QualifiedItemId);
+-		spriteBatch.Draw(itemData.GetTexture(), location + new Vector2(32f, 32f) * scaleSize, itemData.GetSourceRect(), color * transparency, 0f, new Vector2(8f, 8f) * scaleSize, scaleSize * 4f, SpriteEffects.None, layerDepth);
++		// Port: the tractor kit ring has its own 16x16 icon (green band, tractor tyre for a stone).
++		Texture2D kitIcon = VitaTractorMod.IsKit(this) ? VitaTractorRenderer.KitRingTexture : null;
++		if (kitIcon != null)
++		{
++			spriteBatch.Draw(kitIcon, location + new Vector2(32f, 32f) * scaleSize, new Rectangle(0, 0, 16, 16), color * transparency, 0f, new Vector2(8f, 8f), scaleSize * 4f, SpriteEffects.None, layerDepth);
++		}
++		else
++		{
++			ParsedItemData itemData = ItemRegistry.GetDataOrErrorItem(QualifiedItemId);
++			spriteBatch.Draw(itemData.GetTexture(), location + new Vector2(32f, 32f) * scaleSize, itemData.GetSourceRect(), color * transparency, 0f, new Vector2(8f, 8f) * scaleSize, scaleSize * 4f, SpriteEffects.None, layerDepth);
++		}
+ 		DrawMenuIcons(spriteBatch, location, scaleSize, transparency, layerDepth, drawStackNumber, color);
+ 	}
+ 
+@@ -396,8 +409,10 @@ public class Ring : Item
+ 		{
+ 			loadDisplayFields();
+ 		}
+-		Utility.drawTextWithShadow(spriteBatch, Game1.parseText(description, Game1.smallFont, getDescriptionWidth()), font, new Vector2(x + 16, y + 16 + 4), Game1.textColor);
+-		y += (int)font.MeasureString(Game1.parseText(description, Game1.smallFont, getDescriptionWidth())).Y;
++		// Use the same description that sized the tooltip, including the tractor kit override.
++		string tooltipDescription = getDescription();
++		Utility.drawTextWithShadow(spriteBatch, tooltipDescription, font, new Vector2(x + 16, y + 16 + 4), Game1.textColor);
++		y += (int)font.MeasureString(tooltipDescription).Y;
+ 		if (GetsEffectOfRing("810") || GetsEffectOfRing("530"))
+ 		{
+ 			Utility.drawWithShadow(spriteBatch, Game1.mouseCursors, new Vector2(x + 16 + 4, y + 16 + 4), new Rectangle(110, 428, 10, 10), Color.White, 0f, Vector2.Zero, 4f, flipped: false, 1f);
+@@ -420,6 +435,10 @@ public class Ring : Item
+ 
+ 	public override string getDescription()
+ 	{
++		if (VitaTractorMod.IsKit(this))
++		{
++			return Game1.parseText(VitaTractorMod.KitDescription, Game1.smallFont, getDescriptionWidth());
++		}
+ 		if (description == null)
+ 		{
+ 			loadDisplayFields();
+@@ -447,6 +466,9 @@ public class Ring : Item
+ 
+ 	public virtual bool CanCombine(Ring ring)
+ 	{
++		// The kit's identity is on this item, not on a forged CombinedRing.
++		// Keep it intact instead of consuming it into a ring that cannot convert a horse.
++		if (ring == null || VitaTractorMod.IsKit(this) || VitaTractorMod.IsKit(ring)) return false;
+ 		if (ring is CombinedRing || this is CombinedRing)
+ 		{
+ 			return false;

@@ -1,0 +1,2503 @@
+diff --git a/StardewValley/GameLocation.cs b/StardewValley/GameLocation.cs
+index b87ccac3b56118f7ef28bd5bb08a582a95942203..a382e512474988984f28cda7cdaacef787ad160f 100644
+--- a/StardewValley/GameLocation.cs
++++ b/StardewValley/GameLocation.cs
+@@ -212,7 +212,186 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 	public afterQuestionBehavior afterQuestion;
+ 
+ 	[XmlIgnore]
+-	public Map map;
++	private Map _map;
++
++	/// <summary>Value of <see cref="Game1.ticks" /> when <see cref="map" /> was last read.</summary>
++	[XmlIgnore]
++	public int MapLastAccessTick;
++
++	/// <summary>Whether <see cref="UnloadMapForMemory" /> released the map; the next read reloads it.</summary>
++	[XmlIgnore]
++	private bool _mapUnloadedForMemory;
++
++	/// <summary>Value of <see cref="Game1.ticks" /> when the map was last unloaded for memory.</summary>
++	[XmlIgnore]
++	public int MapUnloadedTick;
++
++	/// <summary>Set when the map was reloaded from disk, so the next player entry re-applies all modifications.</summary>
++	[XmlIgnore]
++	private bool _forceMapModificationsOnEntry;
++
++	/// <summary>Set while reloading an unloaded map, which loads no tile sheet textures (drawing loads them).</summary>
++	[XmlIgnore]
++	private bool _reloadingMapWithoutTextures;
++
++	/// <summary>Whether loading or re-seasoning the map should load its tile sheet textures now.</summary>
++	/// <remarks>
++	/// Low-RAM port: only the current (or incoming) location is drawn, and drawing loads missing tile
++	/// sheets, so other locations skip them. The original loaded every location's tile sheets while a
++	/// save loaded (all 93 locations are created), a ~30 MB spike at the worst possible moment.
++	/// </remarks>
++	private bool ShouldLoadTileSheetTextures
++	{
++		get
++		{
++			if (_reloadingMapWithoutTextures)
++			{
++				return false;
++			}
++			if (!MapMemoryManager.Enabled)
++			{
++				return true;
++			}
++			if (Game1.currentLocation != this)
++			{
++				return Game1.locationRequest?.Location == this;
++			}
++			return true;
++		}
++	}
++
++	/// <summary>Map loader for non-structure locations, so the map can be released (see <see cref="getMapLoader" />).</summary>
++	[XmlIgnore]
++	private LocalizedContentManager _mapLoader;
++
++	/// <summary>The loaded map.</summary>
++	/// <remarks>
++	/// Low-RAM port: reads are timestamped so maps nothing has read for a while can be unloaded by
++	/// <see cref="MapMemoryManager" />; reading an unloaded map reloads it.
++	/// </remarks>
++	[XmlIgnore]
++	public Map map
++	{
++		get
++		{
++			MapLastAccessTick = Game1.ticks;
++			if (_map == null && _mapUnloadedForMemory)
++			{
++				ReloadMapAfterUnload();
++			}
++			return _map;
++		}
++		set
++		{
++			_map = value;
++			_mapUnloadedForMemory = false;
++		}
++	}
++
++	/// <summary>The loaded map without counting as an access or reloading it (for diagnostics).</summary>
++	[XmlIgnore]
++	public Map PeekMap => _map;
++
++	[XmlIgnore]
++	public bool IsMapUnloadedForMemory => _mapUnloadedForMemory;
++
++	/// <summary>Value of <see cref="Game1.ticks" /> when this was last seen as the current location.</summary>
++	[XmlIgnore]
++	public int LastCurrentTick;
++
++	/// <summary><see cref="WorldDate.TotalDays" /> on which the map was found to be reloaded right after unloading; it then stays loaded that day.</summary>
++	[XmlIgnore]
++	private int _mapPinnedOnDay = -1;
++
++	/// <summary>Whether no player is in or entering this location, so nothing needs its map drawn or kept.</summary>
++	private bool IsUnoccupiedForMemory()
++	{
++		if (Game1.currentLocation == this || Game1.player?.currentLocation == this || farmers.Any())
++		{
++			return false;
++		}
++		return Game1.locationRequest?.Location != this;
++	}
++
++	/// <summary>Set once the tile sheets were released; cleared while this is the current location.</summary>
++	[XmlIgnore]
++	public bool TileSheetsReleasedForMemory;
++
++	/// <summary>Whether the tile sheet textures of this location's map may be released right now.</summary>
++	public bool CanReleaseTileSheetsForMemory()
++	{
++		if (_map != null && !TileSheetsReleasedForMemory)
++		{
++			return IsUnoccupiedForMemory();
++		}
++		return false;
++	}
++
++	/// <summary>Release the map's tile sheet textures but keep the map; drawing it loads them again.</summary>
++	/// <remarks>
++	/// Maps of unoccupied locations are still read every few seconds (NPCs walking off-screen, the
++	/// 10-minute update's fishing/ore pan spots), but only the current location is drawn, so the
++	/// textures can go without the map having to be reloaded.
++	/// </remarks>
++	public void ReleaseTileSheetsForMemory()
++	{
++		_map.DisposeTileSheets(Game1.mapDisplayDevice);
++		TileSheetsReleasedForMemory = true;
++	}
++
++	/// <summary>Whether this location's map may be released to save memory right now.</summary>
++	/// <remarks>Temporary and generated locations (mines, volcano, event maps) are left alone; they're discarded anyway.</remarks>
++	public virtual bool CanUnloadMapForMemory()
++	{
++		if (_map == null || _mapUnloadedForMemory || mapPath.Value == null || IsTemporary || this is MineShaft || this is VolcanoDungeon)
++		{
++			return false;
++		}
++		if (_mapPinnedOnDay == Game1.Date.TotalDays)
++		{
++			return false;
++		}
++		return IsUnoccupiedForMemory();
++	}
++
++	/// <summary>Release the map and its tile sheet references. The next read of <see cref="map" /> reloads it from disk.</summary>
++	/// <remarks>
++	/// A reloaded map is in the state the original game has after loading a save for a location the
++	/// player hasn't entered yet: the map modifications (bridges, renovations, wallpaper, overrides...)
++	/// are applied again with force on the next player entry, which is where the original applies them.
++	/// </remarks>
++	public void UnloadMapForMemory()
++	{
++		_map.DisposeTileSheets(Game1.mapDisplayDevice);
++		_map = null;
++		_mapUnloadedForMemory = true;
++		_forceMapModificationsOnEntry = true;
++		_madeMapModifications = false;
++		_appliedMapOverrides?.Clear();
++		_mapSeatsDirty = true;
++		MapUnloadedTick = Game1.ticks;
++		getMapLoader().Unload();
++		MapMemoryManager.OnUnload(this);
++	}
++
++	private void ReloadMapAfterUnload()
++	{
++		_mapUnloadedForMemory = false;
++		_reloadingMapWithoutTextures = true;
++		try
++		{
++			loadMap(mapPath.Value);
++		}
++		finally
++		{
++			_reloadingMapWithoutTextures = false;
++		}
++		if (MapMemoryManager.OnReload(this))
++		{
++			// Something reads this map regularly: unloading it again would only thrash.
++			_mapPinnedOnDay = Game1.Date.TotalDays;
++		}
++	}
+ 
+ 	[XmlIgnore]
+ 	public readonly NetString mapPath = new NetString().Interpolated(interpolate: false, wait: false);
+@@ -261,6 +440,15 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 
+ 	public readonly NetCollection<LargeTerrainFeature> largeTerrainFeatures = new NetCollection<LargeTerrainFeature>();
+ 
++	/// <summary>Port: <see cref="F:StardewValley.GameLocation.largeTerrainFeatures" />' bounding boxes in collection order, for collision checks (see <see cref="M:StardewValley.GameLocation.GetLargeTerrainFeatureBounds(System.Int32@)" />).</summary>
++	private Microsoft.Xna.Framework.Rectangle[] _largeTerrainFeatureBounds = new Microsoft.Xna.Framework.Rectangle[0];
++
++	/// <summary>Port: how many entries of <see cref="F:StardewValley.GameLocation._largeTerrainFeatureBounds" /> are valid, or -1 when the collection changed since they were computed.</summary>
++	private int _largeTerrainFeatureBoundsCount = -1;
++
++	/// <summary>Port: <see cref="F:StardewValley.TerrainFeatures.LargeTerrainFeature.TileVersion" /> when <see cref="F:StardewValley.GameLocation._largeTerrainFeatureBounds" /> was computed.</summary>
++	private int _largeTerrainFeatureBoundsVersion;
++
+ 	[XmlIgnore]
+ 	public List<TerrainFeature> _activeTerrainFeatures = new List<TerrainFeature>();
+ 
+@@ -637,7 +825,47 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		return CheckItemPlantRules(itemId, isGardenPot: false, IsGreenhouse || IsFarm || object.Equals(true, GetData()?.CanPlantHere) || (Object.isWildTreeSeed(itemId) && IsOutdoors && doesTileHavePropertyNoNull(tileX, tileY, "Type", "Back") == "Dirt") || object.Equals(true, map?.Properties.ContainsKey("ForceAllowTreePlanting")), out deniedMessage);
+ 	}
+ 
++	/// <summary>
++	/// Port: while true (one tractor 3x3 pass), CheckItemPlantRules answers repeated questions about the same location,
++	/// seed and pot kind from the first answer. The rules are game state queries; the device log showed them in an 84 ms
++	/// planting spike, asked twice per tile (canPlantThisSeedHere and plant).
++	/// </summary>
++	public static bool VitaCachePlantRules;
++
++	private static GameLocation _vitaRuleLocation;
++
++	private static string _vitaRuleItem, _vitaRuleMessage;
++
++	private static bool _vitaRulePot, _vitaRuleDefault, _vitaRuleResult;
++
++	public static void VitaClearPlantRuleCache()
++	{
++		_vitaRuleLocation = null;
++		_vitaRuleItem = _vitaRuleMessage = null;
++	}
++
+ 	public bool CheckItemPlantRules(string itemId, bool isGardenPot, bool defaultAllowed, out string deniedMessage)
++	{
++		if (VitaCachePlantRules)
++		{
++			if (_vitaRuleLocation == this && _vitaRuleItem == itemId && _vitaRulePot == isGardenPot && _vitaRuleDefault == defaultAllowed)
++			{
++				deniedMessage = _vitaRuleMessage;
++				return _vitaRuleResult;
++			}
++			bool result = VitaCheckItemPlantRules(itemId, isGardenPot, defaultAllowed, out deniedMessage);
++			_vitaRuleLocation = this;
++			_vitaRuleItem = itemId;
++			_vitaRulePot = isGardenPot;
++			_vitaRuleDefault = defaultAllowed;
++			_vitaRuleResult = result;
++			_vitaRuleMessage = deniedMessage;
++			return result;
++		}
++		return VitaCheckItemPlantRules(itemId, isGardenPot, defaultAllowed, out deniedMessage);
++	}
++
++	private bool VitaCheckItemPlantRules(string itemId, bool isGardenPot, bool defaultAllowed, out string deniedMessage)
+ 	{
+ 		ItemMetadata metadata = ItemRegistry.GetMetadata(itemId);
+ 		if (metadata != null && metadata.TypeIdentifier == "(O)")
+@@ -825,17 +1053,28 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		};
+ 		terrainFeatures.OnValueAdded += (Vector2 tile, TerrainFeature feature) =>
+ 		{
++			VitaTerrainVersion++;
+ 			OnTerrainFeatureAdded(feature, tile);
+ 		};
+ 		terrainFeatures.OnValueRemoved += (Vector2 tile, TerrainFeature feature) =>
+ 		{
++			VitaTerrainVersion++;
+ 			OnTerrainFeatureRemoved(feature);
+ 		};
++		terrainFeatures.OnValueTargetUpdated += delegate
++		{
++			VitaTerrainVersion++;
++		};
+ 		largeTerrainFeatures.OnValueAdded += (LargeTerrainFeature feature) =>
+ 		{
+ 			OnTerrainFeatureAdded(feature, feature.Tile);
++			_largeTerrainFeatureBoundsCount = -1;
+ 		};
+ 		largeTerrainFeatures.OnValueRemoved += OnTerrainFeatureRemoved;
++		largeTerrainFeatures.OnValueRemoved += delegate
++		{
++			_largeTerrainFeatureBoundsCount = -1;
++		};
+ 		resourceClumps.OnValueAdded += OnResourceClumpAdded;
+ 		resourceClumps.OnValueRemoved += OnResourceClumpRemoved;
+ 		furniture.OnValueAdded += (Furniture f) =>
+@@ -894,6 +1133,26 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			Game1.stats.Get("MasteryExp");
+ 			int levelsAchieved = MasteryTrackerMenu.getCurrentMasteryLevel();
+ 			int levelsNotSpent = levelsAchieved - (int)Game1.stats.Get("masteryLevelsSpent");
++			void ShowSkillMastery(int skill, Vector2 spritePosition)
++			{
++				uint num = Game1.player.stats.Get(StatKeys.Mastery(skill));
++				if (levelsNotSpent > 0 && num == 0)
++				{
++					temporarySprites.Add(new TemporaryAnimatedSprite("LooseSprites\\Cursors_1_6", new Microsoft.Xna.Framework.Rectangle(16, 110, 7, 9), spritePosition * 4f, flipped: false, 0f, Color.White)
++					{
++						animationLength = 15,
++						interval = 50f,
++						totalNumberOfLoops = 999999,
++						scale = 4f,
++						id = 8765 + skill
++					});
++				}
++				else if (num != 0)
++				{
++					MasteryTrackerMenu.addSkillFlairPlaque(skill);
++				}
++				Game1.changeMusicTrack("Upper_Ambient");
++			}
+ 			ShowSkillMastery(4, new Vector2(54f, 98f));
+ 			ShowSkillMastery(2, new Vector2(84f, 82f));
+ 			ShowSkillMastery(0, new Vector2(116f, 82f));
+@@ -1243,7 +1502,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		}
+ 		if (feature.NeedsUpdate)
+ 		{
+-			_activeTerrainFeatures.Remove(feature);
++			VitaRemoveActiveTerrainFeature(feature);
+ 		}
+ 		feature.Location = null;
+ 	}
+@@ -1256,7 +1515,21 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		}
+ 		else
+ 		{
+-			_activeTerrainFeatures.Remove(feature);
++			VitaRemoveActiveTerrainFeature(feature);
++		}
++	}
++
++	/// <summary>Port: takes a feature out of <see cref="_activeTerrainFeatures" />, searching from the end.</summary>
++	/// <remarks>Features leave the list from inside the update loop, which walks it from the end: the one leaving sits at or
++	/// near the end. List.Remove searched from the start, so a paved farm (thousands of floors, each leaving after its first
++	/// tick) cost n² / 2 comparisons on entry, 10% of the frames for seconds in a fully paved save. The list holds no
++	/// duplicates (NeedsUpdate only subscribes on a change), so which occurrence is taken does not matter.</remarks>
++	private void VitaRemoveActiveTerrainFeature(TerrainFeature feature)
++	{
++		int index = _activeTerrainFeatures.LastIndexOf(feature);
++		if (index >= 0)
++		{
++			_activeTerrainFeatures.RemoveAt(index);
+ 		}
+ 	}
+ 
+@@ -1314,9 +1587,30 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 
+ 	public LocationWeather GetWeather()
+ 	{
++		// Port: the weather object of this tick, looked up once. Every farm animal asks each tick whether it rains
++		// (FarmAnimal.behaviors), each time a string-keyed lookup in the world state's net dictionary: 3.5% of the frame on
++		// a farm full of animals. Within one tick the answer is the same object.
++		if (VitaPlatform.IsVita)
++		{
++			NetWorldState worldState = Game1.netWorldState.Value;
++			if (_vitaWeather == null || _vitaWeatherTick != Game1.ticks || _vitaWeatherWorld != worldState)
++			{
++				_vitaWeather = worldState.GetWeatherForLocation(GetLocationContextId());
++				_vitaWeatherTick = Game1.ticks;
++				_vitaWeatherWorld = worldState;
++			}
++			return _vitaWeather;
++		}
+ 		return Game1.netWorldState.Value.GetWeatherForLocation(GetLocationContextId());
+ 	}
+ 
++	/// <summary>Port: the weather <see cref="GetWeather" /> found this tick (<see cref="_vitaWeatherTick" />), and in which world state.</summary>
++	private LocationWeather _vitaWeather;
++
++	private int _vitaWeatherTick;
++
++	private NetWorldState _vitaWeatherWorld;
++
+ 	public bool IsRainingHere()
+ 	{
+ 		return GetWeather().IsRaining;
+@@ -1417,7 +1711,17 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			IsGreenhouse = true;
+ 		}
+ 		reloadMap();
+-		loadObjects();
++		if (!Game1.IsLoadingSavedGame)
++		{
++			loadObjects();
++		}
++		else
++		{
++			// Skip path-layer objects during save loading, but retain the map's exits.
++			// updateMap won't rebuild layout when reloadMap already set loadedMapPath.
++			updateWarps();
++			updateDoors();
++		}
+ 	}
+ 
+ 	public virtual void AddDefaultBuildings(bool load = true)
+@@ -1441,8 +1745,15 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		buildings.Add(building);
+ 	}
+ 
++	/// <summary>Port: set while the tractor plants a 3x3 pass; HoeDirt.plant would start a sound per tile (9 per pass).</summary>
++	public static bool VitaMuteSounds;
++
+ 	public void playSound(string audioName, Vector2? position = null, int? pitch = null, SoundContext context = SoundContext.Default)
+ 	{
++		if (VitaMuteSounds)
++		{
++			return;
++		}
+ 		Game1.sounds.PlayAll(audioName, this, position, pitch, context);
+ 	}
+ 
+@@ -1461,7 +1772,17 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			}
+ 			return _structureMapLoader;
+ 		}
+-		return Game1.game1.xTileContent;
++		// Low-RAM port: the shared xTileContent keeps every map it ever loaded. A loader per location
++		// lets UnloadMapForMemory actually release the map.
++		if (!MapMemoryManager.Enabled)
++		{
++			return Game1.game1.xTileContent;
++		}
++		if (_mapLoader == null)
++		{
++			_mapLoader = Game1.game1.xTileContent.CreateTemporary();
++		}
++		return _mapLoader;
+ 	}
+ 
+ 	public void cleanUpTileForMapOverride(Point tile)
+@@ -1540,10 +1861,8 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			if (map_tilesheet == null || dest_image_source != source_image_source)
+ 			{
+ 				map_tilesheet = new TileSheet(GetAddedMapOverrideTilesheetId(override_key, override_tile_sheet.Id), map, override_tile_sheet.ImageSource, override_tile_sheet.SheetSize, override_tile_sheet.TileSize);
+-				for (int i = 0; i < override_tile_sheet.TileCount; i++)
+-				{
+-					map_tilesheet.TileIndexProperties[i].CopyFrom(override_tile_sheet.TileIndexProperties[i]);
+-				}
++				// Port: one bulk copy instead of TileIndexProperties[i].CopyFrom(...) per tile index, each of which scanned every property of both sheets.
++				map_tilesheet.TileIndexProperties.CopyRangeFrom(override_tile_sheet.TileIndexProperties, 0, override_tile_sheet.TileCount);
+ 				map.AddTileSheet(map_tilesheet);
+ 			}
+ 			else if (map_tilesheet.TileCount < override_tile_sheet.TileCount)
+@@ -1551,10 +1870,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 				int tileCount = map_tilesheet.TileCount;
+ 				map_tilesheet.SheetWidth = override_tile_sheet.SheetWidth;
+ 				map_tilesheet.SheetHeight = override_tile_sheet.SheetHeight;
+-				for (int j = tileCount; j < override_tile_sheet.TileCount; j++)
+-				{
+-					map_tilesheet.TileIndexProperties[j].CopyFrom(override_tile_sheet.TileIndexProperties[j]);
+-				}
++				map_tilesheet.TileIndexProperties.CopyRangeFrom(override_tile_sheet.TileIndexProperties, tileCount, override_tile_sheet.TileCount);
+ 			}
+ 			tilesheet_lookup[override_tile_sheet] = map_tilesheet;
+ 		}
+@@ -1637,10 +1953,12 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 							if (tile is AnimatedTile animatedTile)
+ 							{
+ 								AnimatedTile override_animated_tile = animatedTile;
+-								StaticTile[] tiles = new StaticTile[override_animated_tile.TileFrames.Length];
+-								for (int n = 0; n < override_animated_tile.TileFrames.Length; n++)
++								// TileFrames returns a copy: take one snapshot for the whole animation.
++								StaticTile[] frames = override_animated_tile.TileFrames;
++								StaticTile[] tiles = new StaticTile[frames.Length];
++								for (int n = 0; n < frames.Length; n++)
+ 								{
+-									StaticTile frame_tile = override_animated_tile.TileFrames[n];
++									StaticTile frame_tile = frames[n];
+ 									tiles[n] = new StaticTile(target_layer, tilesheet_lookup[frame_tile.TileSheet], frame_tile.BlendMode, frame_tile.TileIndex);
+ 								}
+ 								new_tile = new AnimatedTile(target_layer, tiles, override_animated_tile.FrameInterval);
+@@ -1651,7 +1969,12 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 							new_tile = new StaticTile(target_layer, tilesheet_lookup[override_tile.TileSheet], override_tile.BlendMode, override_tile.TileIndex);
+ 						}
+ 					}
+-					new_tile?.Properties.CopyFrom(override_tile.Properties);
++					// Reading an empty tile's Properties would allocate a collection on both maps.
++					IPropertyCollection tileProperties = override_tile.PropertiesIfAny;
++					if (new_tile != null && tileProperties != null && tileProperties.Count > 0)
++					{
++						new_tile.Properties.CopyFrom(tileProperties);
++					}
+ 					target_layer.Tiles[dest_tile_pos.X, dest_tile_pos.Y] = new_tile;
+ 				}
+ 			}
+@@ -1703,6 +2026,35 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		}
+ 	}
+ 
++	private static Dictionary<string, string> _cachedChairDataSource;
++
++	private static Dictionary<string, Dictionary<int, string>> _cachedChairTilesBySheet;
++
++	private static Dictionary<string, Dictionary<int, string>> GetParsedChairTiles(Dictionary<string, string> chair_tile_data)
++	{
++		if (!object.ReferenceEquals(chair_tile_data, _cachedChairDataSource) || _cachedChairTilesBySheet == null)
++		{
++			_cachedChairDataSource = chair_tile_data;
++			_cachedChairTilesBySheet = new Dictionary<string, Dictionary<int, string>>(StringComparer.Ordinal);
++			foreach (KeyValuePair<string, string> kvp in chair_tile_data)
++			{
++				int s1 = kvp.Key.IndexOf('/');
++				int s2 = (s1 >= 0) ? kvp.Key.IndexOf('/', s1 + 1) : (-1);
++				if (s1 > 0 && s2 > s1 + 1 && int.TryParse(kvp.Key.Substring(s1 + 1, s2 - s1 - 1), out int tx) && int.TryParse(kvp.Key.Substring(s2 + 1), out int ty))
++				{
++					string sheetName = kvp.Key.Substring(0, s1);
++					if (!_cachedChairTilesBySheet.TryGetValue(sheetName, out var sheetDict))
++					{
++						sheetDict = new Dictionary<int, string>();
++						_cachedChairTilesBySheet[sheetName] = sheetDict;
++					}
++					sheetDict[(tx << 16) | (ty & 0xFFFF)] = kvp.Value;
++				}
++			}
++		}
++		return _cachedChairTilesBySheet;
++	}
++
+ 	public virtual void UpdateMapSeats()
+ 	{
+ 		_mapSeatsDirty = false;
+@@ -1710,7 +2062,6 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		{
+ 			return;
+ 		}
+-		Dictionary<string, string> base_tilesheet_paths = new Dictionary<string, string>();
+ 		Dictionary<string, string> chair_tile_data = DataLoader.ChairTiles(Game1.content);
+ 		mapSeats.Clear();
+ 		Layer buildings_layer = map.GetLayer("Buildings");
+@@ -1718,33 +2069,49 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		{
+ 			return;
+ 		}
+-		for (int x = 0; x < buildings_layer.LayerWidth; x++)
++		Dictionary<string, Dictionary<int, string>> bySheet = GetParsedChairTiles(chair_tile_data);
++		Dictionary<TileSheet, Dictionary<int, string>> activeSheets = null;
++		foreach (TileSheet ts in map.TileSheets)
+ 		{
+-			for (int y = 0; y < buildings_layer.LayerHeight; y++)
++			string path = Path.GetFileNameWithoutExtension(ts.ImageSource);
++			if (path.StartsWith("summer_") || path.StartsWith("winter_") || path.StartsWith("fall_"))
+ 			{
+-				Tile tile = buildings_layer.Tiles[x, y];
+-				if (tile == null)
++				path = "spring_" + path.Substring(path.IndexOf('_') + 1);
++			}
++			if (bySheet.TryGetValue(path, out var sheetChairs))
++			{
++				if (activeSheets == null)
+ 				{
+-					continue;
++					activeSheets = new Dictionary<TileSheet, Dictionary<int, string>>();
+ 				}
+-				string path = Path.GetFileNameWithoutExtension(tile.TileSheet.ImageSource);
+-				if (base_tilesheet_paths.TryGetValue(path, out var overridePath))
++				activeSheets[ts] = sheetChairs;
++			}
++		}
++		if (activeSheets == null)
++		{
++			return;
++		}
++		int width = buildings_layer.LayerWidth;
++		int height = buildings_layer.LayerHeight;
++		TileArray tiles = buildings_layer.Tiles;
++		for (int x = 0; x < width; x++)
++		{
++			for (int y = 0; y < height; y++)
++			{
++				Tile tile = tiles[x, y];
++				if (tile == null)
+ 				{
+-					path = overridePath;
++					continue;
+ 				}
+-				else
++				TileSheet sheet = tile.TileSheet;
++				if (!activeSheets.TryGetValue(sheet, out var sheetChairs2))
+ 				{
+-					if (path.StartsWith("summer_") || path.StartsWith("winter_") || path.StartsWith("fall_"))
+-					{
+-						path = "spring_" + path.Substring(path.IndexOf('_') + 1);
+-					}
+-					base_tilesheet_paths[path] = path;
++					continue;
+ 				}
+-				int tiles_per_row = tile.TileSheet.SheetWidth;
++				int tiles_per_row = sheet.SheetWidth;
+ 				int tile_x = tile.TileIndex % tiles_per_row;
+ 				int tile_y = tile.TileIndex / tiles_per_row;
+-				string key = path + "/" + tile_x + "/" + tile_y;
+-				if (chair_tile_data.TryGetValue(key, out var data))
++				if (sheetChairs2.TryGetValue((tile_x << 16) | (tile_y & 0xFFFF), out var data))
+ 				{
+ 					MapSeat seat = MapSeat.FromData(data, x, y);
+ 					if (seat != null)
+@@ -1830,7 +2197,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			treatAsOutdoors.Value = true;
+ 		}
+ 		updateSeasonalTileSheets(map);
+-		map.LoadTileSheets(Game1.mapDisplayDevice);
++		if (ShouldLoadTileSheetTextures)
++		{
++			map.LoadTileSheets(Game1.mapDisplayDevice);
++		}
+ 		if (Game1.IsMasterGame || IsTemporary)
+ 		{
+ 			_mapSeatsDirty = true;
+@@ -1839,11 +2209,31 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		{
+ 			waterTiles = new WaterTiles(map.Layers[0].LayerWidth, map.Layers[0].LayerHeight);
+ 			bool foundAnyWater = false;
+-			for (int x = 0; x < map.Layers[0].LayerWidth; x++)
+-			{
+-				for (int y = 0; y < map.Layers[0].LayerHeight; y++)
+-				{
+-					string water_property = doesTileHaveProperty(x, y, "Water", "Back");
++			// Port: with no buildings/furniture (the case during a load) doesTileHaveProperty only reads the
++			// Back layer tile, so read it directly instead of re-scanning the lists and looking the layer up per tile.
++			// IslandLocation's override only changes "Diggable", so "Water" is unaffected.
++			bool plainScan = buildings.Count == 0 && furniture.Count == 0;
++			Layer waterBackLayer = plainScan ? map.GetLayer("Back") : null;
++			int waterWidth = map.Layers[0].LayerWidth;
++			int waterHeight = map.Layers[0].LayerHeight;
++			for (int x = 0; x < waterWidth; x++)
++			{
++				for (int y = 0; y < waterHeight; y++)
++				{
++					string water_property;
++					if (plainScan)
++					{
++						water_property = null;
++						Tile waterTile = waterBackLayer?.Tiles[x, y];
++						if (waterTile != null && !FrameworkExtensions.TryGetValue(waterTile.PropertiesIfAny, "Water", out water_property) && !waterTile.TileIndexProperties.TryGetValue("Water", out water_property))
++						{
++							water_property = null;
++						}
++					}
++					else
++					{
++						water_property = doesTileHaveProperty(x, y, "Water", "Back");
++					}
+ 					if (water_property != null)
+ 					{
+ 						foundAnyWater = true;
+@@ -1975,9 +2365,16 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		{
+ 			return null;
+ 		}
++		// Port: the box's tile edges don't depend on the warp; they were recomputed (as double divisions) for each of
++		// the location's warps, on every tick of every NPC walking a schedule.
++		int leftTile = (int)Math.Floor((double)position.Left / 64.0);
++		int rightTile = (int)Math.Floor((double)position.Right / 64.0);
++		int topTile = (int)Math.Floor((double)position.Top / 64.0);
++		int bottomTile = (int)Math.Floor((double)position.Bottom / 64.0);
++		bool characterIsNpc = character is NPC;
+ 		foreach (Warp w in warps)
+ 		{
+-			if ((!(character is NPC) && w.npcOnly.Value) || (w.X != (int)Math.Floor((double)position.Left / 64.0) && w.X != (int)Math.Floor((double)position.Right / 64.0)) || (w.Y != (int)Math.Floor((double)position.Top / 64.0) && w.Y != (int)Math.Floor((double)position.Bottom / 64.0)))
++			if ((!characterIsNpc && w.npcOnly.Value) || (w.X != leftTile && w.X != rightTile) || (w.Y != topTile && w.Y != bottomTile))
+ 			{
+ 				continue;
+ 			}
+@@ -2010,20 +2407,23 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 
+ 	public virtual Warp isCollidingWithDoors(Microsoft.Xna.Framework.Rectangle position, Character character = null)
+ 	{
++		// Port: nothing below can match in a location with no doors and no buildings.
++		if (doors.Length == 0 && buildings.Count == 0)
++		{
++			return null;
++		}
+ 		for (int i = 0; i < 4; i++)
+ 		{
+ 			Vector2 v = Utility.getCornersOfThisRectangle(ref position, i);
+ 			Point rectangleCorner = new Point((int)v.X / 64, (int)v.Y / 64);
+-			foreach (KeyValuePair<Point, string> pair2 in doors.Pairs)
++			// Port: a key lookup instead of walking every door for each corner; every NPC walking
++			// on a schedule asks this every tick, wherever the player is.
++			if (doors.ContainsKey(rectangleCorner))
+ 			{
+-				Point door = pair2.Key;
+-				if (rectangleCorner == door)
++				Warp warp = getWarpFromDoor(rectangleCorner, character);
++				if (warp != null)
+ 				{
+-					Warp warp = getWarpFromDoor(door, character);
+-					if (warp != null)
+-					{
+-						return warp;
+-					}
++					return warp;
+ 				}
+ 			}
+ 			foreach (Building building in buildings)
+@@ -2237,6 +2637,31 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		return false;
+ 	}
+ 
++	/// <summary>Port: the bounding boxes of <see cref="F:StardewValley.GameLocation.largeTerrainFeatures" />, in collection order.</summary>
++	/// <param name="count">How many entries of the returned array are valid (the array may be longer).</param>
++	/// <remarks>Every moving NPC tests each step against every bush of its location; on the Vita, computing those boxes anew was the largest single cost of NPC movement. Bush and tent boxes depend only on their tile and size (fixed at construction), so they're recomputed when the collection changes or any large terrain feature's tile changes.</remarks>
++	private Microsoft.Xna.Framework.Rectangle[] GetLargeTerrainFeatureBounds(out int count)
++	{
++		int featureCount = largeTerrainFeatures.Count;
++		int version = LargeTerrainFeature.TileVersion;
++		if (_largeTerrainFeatureBoundsCount != featureCount || _largeTerrainFeatureBoundsVersion != version)
++		{
++			if (_largeTerrainFeatureBounds.Length < featureCount)
++			{
++				_largeTerrainFeatureBounds = new Microsoft.Xna.Framework.Rectangle[featureCount];
++			}
++			int i = 0;
++			foreach (LargeTerrainFeature feature in largeTerrainFeatures)
++			{
++				_largeTerrainFeatureBounds[i++] = feature.getBoundingBox();
++			}
++			_largeTerrainFeatureBoundsCount = featureCount;
++			_largeTerrainFeatureBoundsVersion = version;
++		}
++		count = featureCount;
++		return _largeTerrainFeatureBounds;
++	}
++
+ 	protected bool _TestCornersTiles(Vector2 top_right, Vector2 top_left, Vector2 bottom_right, Vector2 bottom_left, Vector2 top_mid, Vector2 bottom_mid, Vector2? player_top_right, Vector2? player_top_left, Vector2? player_bottom_right, Vector2? player_bottom_left, Vector2? player_top_mid, Vector2? player_bottom_mid, bool bigger_than_tile, Func<Vector2, bool> action)
+ 	{
+ 		_visitedCollisionTiles.Clear();
+@@ -2326,22 +2751,252 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		return false;
+ 	}
+ 
++	private Map _cachedCollisionMap;
++
++	private Layer _cachedBackLayer;
++
++	private Layer _cachedBuildingsLayer;
++
++	private int _cachedLayer0DisplayWidth;
++
++	private int _cachedLayer0DisplayHeight;
++
++	private void EnsureCollisionLayers()
++	{
++		if (!object.ReferenceEquals(_cachedCollisionMap, map) || _cachedBackLayer == null)
++		{
++			_cachedCollisionMap = map;
++			if (map != null)
++			{
++				Layer layer0 = map.Layers[0];
++				_cachedLayer0DisplayWidth = layer0.DisplayWidth;
++				_cachedLayer0DisplayHeight = layer0.DisplayHeight;
++				_cachedBackLayer = map.GetLayer("Back");
++				_cachedBuildingsLayer = map.GetLayer("Buildings");
++			}
++		}
++	}
++
+ 	public virtual bool IsOutOfBounds(Microsoft.Xna.Framework.Rectangle pixelPosition)
+ 	{
+ 		if (pixelPosition.Right < 0 || pixelPosition.Bottom < 0)
+ 		{
+ 			return true;
+ 		}
+-		Layer layer = map.Layers[0];
+-		if (pixelPosition.X <= layer.DisplayWidth)
++		EnsureCollisionLayers();
++		if (pixelPosition.X <= _cachedLayer0DisplayWidth)
+ 		{
+-			return pixelPosition.Top > layer.DisplayHeight;
++			return pixelPosition.Top > _cachedLayer0DisplayHeight;
+ 		}
+ 		return true;
+ 	}
+ 
++	/// <summary>Port: the distinct tiles one collision test looks at (at most six corners/mid points of a bounding box), each packed as (x &lt;&lt; 16) | (y &amp; 0xFFFF). Replaces a HashSet of Vector2 plus a delegate per tile test; lives in locals, so a collision test inside a collision test can't disturb it.</summary>
++	private struct CollisionTiles
++	{
++		public int Count;
++
++		public int K0;
++
++		public int K1;
++
++		public int K2;
++
++		public int K3;
++
++		public int K4;
++
++		public int K5;
++
++		public bool Contains(int key)
++		{
++			int n = Count;
++			if (n > 0 && K0 == key)
++			{
++				return true;
++			}
++			if (n > 1 && K1 == key)
++			{
++				return true;
++			}
++			if (n > 2 && K2 == key)
++			{
++				return true;
++			}
++			if (n > 3 && K3 == key)
++			{
++				return true;
++			}
++			if (n > 4 && K4 == key)
++			{
++				return true;
++			}
++			return n > 5 && K5 == key;
++		}
++
++		public void Add(int key)
++		{
++			switch (Count)
++			{
++			case 0:
++				K0 = key;
++				break;
++			case 1:
++				K1 = key;
++				break;
++			case 2:
++				K2 = key;
++				break;
++			case 3:
++				K3 = key;
++				break;
++			case 4:
++				K4 = key;
++				break;
++			default:
++				K5 = key;
++				break;
++			}
++			Count++;
++		}
++
++		public int Get(int index)
++		{
++			switch (index)
++			{
++			case 0:
++				return K0;
++			case 1:
++				return K1;
++			case 2:
++				return K2;
++			case 3:
++				return K3;
++			case 4:
++				return K4;
++			default:
++				return K5;
++			}
++		}
++	}
++
++	private static int CollisionTileKey(int x, int y)
++	{
++		return (x << 16) | (y & 0xFFFF);
++	}
++
++	/// <summary>Port: what <see cref="M:StardewValley.GameLocation._TestCornersTiles(Microsoft.Xna.Framework.Vector2,Microsoft.Xna.Framework.Vector2,Microsoft.Xna.Framework.Vector2,Microsoft.Xna.Framework.Vector2,Microsoft.Xna.Framework.Vector2,Microsoft.Xna.Framework.Vector2,System.Nullable{Microsoft.Xna.Framework.Vector2},System.Nullable{Microsoft.Xna.Framework.Vector2},System.Nullable{Microsoft.Xna.Framework.Vector2},System.Nullable{Microsoft.Xna.Framework.Vector2},System.Nullable{Microsoft.Xna.Framework.Vector2},System.Nullable{Microsoft.Xna.Framework.Vector2},System.Boolean,System.Func{Microsoft.Xna.Framework.Vector2,System.Boolean})" /> visited, in its order (top right, top left, bottom left, bottom right, then the two mid points of a box wider than a tile): the tiles of <paramref name="position" /> not already listed and, when <paramref name="hasCurrent" />, not the same corner of the box <paramref name="currentBounds" /> is in now.</summary>
++	private static CollisionTiles CollectCollisionTiles(Microsoft.Xna.Framework.Rectangle position, bool hasCurrent, Microsoft.Xna.Framework.Rectangle currentBounds)
++	{
++		int right = position.Right / 64;
++		int left = position.Left / 64;
++		int top = position.Top / 64;
++		int bottom = position.Bottom / 64;
++		int midX = position.Center.X / 64;
++		CollisionTiles tiles = default(CollisionTiles);
++		int key;
++		if (!hasCurrent)
++		{
++			tiles.Add(CollisionTileKey(right, top));
++			key = CollisionTileKey(left, top);
++			if (!tiles.Contains(key))
++			{
++				tiles.Add(key);
++			}
++			key = CollisionTileKey(left, bottom);
++			if (!tiles.Contains(key))
++			{
++				tiles.Add(key);
++			}
++			key = CollisionTileKey(right, bottom);
++			if (!tiles.Contains(key))
++			{
++				tiles.Add(key);
++			}
++			if (position.Width > 64)
++			{
++				key = CollisionTileKey(midX, top);
++				if (!tiles.Contains(key))
++				{
++					tiles.Add(key);
++				}
++				key = CollisionTileKey(midX, bottom);
++				if (!tiles.Contains(key))
++				{
++					tiles.Add(key);
++				}
++			}
++			return tiles;
++		}
++		int curRight = (currentBounds.Right - 1) / 64;
++		int curLeft = currentBounds.Left / 64;
++		int curTop = currentBounds.Top / 64;
++		int curBottom = (currentBounds.Bottom - 1) / 64;
++		int curMidX = currentBounds.Center.X / 64;
++		key = CollisionTileKey(right, top);
++		if (key != CollisionTileKey(curRight, curTop))
++		{
++			tiles.Add(key);
++		}
++		key = CollisionTileKey(left, top);
++		if (key != CollisionTileKey(curLeft, curTop) && !tiles.Contains(key))
++		{
++			tiles.Add(key);
++		}
++		key = CollisionTileKey(left, bottom);
++		if (key != CollisionTileKey(curLeft, curBottom) && !tiles.Contains(key))
++		{
++			tiles.Add(key);
++		}
++		key = CollisionTileKey(right, bottom);
++		if (key != CollisionTileKey(curRight, curBottom) && !tiles.Contains(key))
++		{
++			tiles.Add(key);
++		}
++		if (position.Width > 64)
++		{
++			key = CollisionTileKey(midX, top);
++			if (key != CollisionTileKey(curMidX, curTop) && !tiles.Contains(key))
++			{
++				tiles.Add(key);
++			}
++			key = CollisionTileKey(midX, bottom);
++			if (key != CollisionTileKey(curMidX, curBottom) && !tiles.Contains(key))
++			{
++				tiles.Add(key);
++			}
++		}
++		return tiles;
++	}
++
++	/// <summary>Port: a property of a tile's own collection (the collection isn't created for a tile that has none).</summary>
++	private static bool TileHasOwnProperty(IPropertyCollection properties, string key)
++	{
++		return properties != null && properties.ContainsKey(key);
++	}
++
++	/// <summary>Port: the step test of an NPC walking its schedule path in a location nobody is in (<see cref="M:StardewValley.Character.IsVitaUnobservedScheduleWalker(StardewValley.GameLocation)" />): the base test without its loops over the location's buildings, resource clumps, furniture and large terrain features, and without the subclass overrides' blockers (train, merchant cart, turtles, landslide).</summary>
++	/// <remarks>
++	/// The schedule path was found with the pathfinding test, which already avoided those buildings, clumps, furniture and bushes, and none of them move without a player there. Walking every one of them each step was ~2% of the Vita's main thread (thirty-odd villagers on the move). The per-tile tests stay as they are: objects and terrain features (what a player leaves on a path, what an NPC tramples or is stopped by), the map's barrier and passability tiles, and the doors an NPC opens.
++	/// What this leaves out only changes anything when such an NPC would have waited or charged through (vanilla charges through any blocker after five seconds), out of sight.
++	/// </remarks>
++	internal bool IsUnobservedStepColliding(Microsoft.Xna.Framework.Rectangle position, xTile.Dimensions.Rectangle viewport, Character character)
++	{
++		return isCollidingPositionBody(position, viewport, isFarmer: false, 0, glider: false, character, pathfinding: false, projectile: false, ignoreCharacterRequirement: false, skipCollisionEffects: false, skipStaticBlockers: true);
++	}
++
+ 	public virtual bool isCollidingPosition(Microsoft.Xna.Framework.Rectangle position, xTile.Dimensions.Rectangle viewport, bool isFarmer, int damagesFarmer, bool glider, Character character, bool pathfinding, bool projectile = false, bool ignoreCharacterRequirement = false, bool skipCollisionEffects = false)
+ 	{
++		return isCollidingPositionBody(position, viewport, isFarmer, damagesFarmer, glider, character, pathfinding, projectile, ignoreCharacterRequirement, skipCollisionEffects, skipStaticBlockers: false);
++	}
++
++	/// <param name="skipStaticBlockers">Port: leave out the loops over the location's animals, buildings, resource clumps, furniture and large terrain features (<see cref="IsUnobservedStepColliding" />).</param>
++	private bool isCollidingPositionBody(Microsoft.Xna.Framework.Rectangle position, xTile.Dimensions.Rectangle viewport, bool isFarmer, int damagesFarmer, bool glider, Character character, bool pathfinding, bool projectile, bool ignoreCharacterRequirement, bool skipCollisionEffects, bool skipStaticBlockers)
++	{
++		// Port: the body of the vanilla method with its per-tile lambdas written as loops over one list of the
++		// tiles to test. Every NPC walking anywhere on the map calls this once a tick, and the delegates, the
++		// closure object, the HashSet of visited tiles and the repeated property lookups were most of its cost.
++		// The tests, their order and what each returns are the vanilla ones.
+ 		bool is_event_up = Game1.eventUp;
+ 		if (is_event_up && Game1.CurrentEvent != null && !Game1.CurrentEvent.ignoreObjectCollisions)
+ 		{
+@@ -2360,59 +3015,37 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		{
+ 			return true;
+ 		}
+-		Vector2 nextTopRight = new Vector2(position.Right / 64, position.Top / 64);
+-		Vector2 nextTopLeft = new Vector2(position.Left / 64, position.Top / 64);
+-		Vector2 nextBottomRight = new Vector2(position.Right / 64, position.Bottom / 64);
+-		Vector2 nextBottomLeft = new Vector2(position.Left / 64, position.Bottom / 64);
+-		bool nextLargerThanTile = position.Width > 64;
+-		Vector2 nextBottomMid = new Vector2(position.Center.X / 64, position.Bottom / 64);
+-		Vector2 nextTopMid = new Vector2(position.Center.X / 64, position.Top / 64);
+ 		BoundingBoxGroup passableTiles = null;
+-		Farmer farmer;
+-		Microsoft.Xna.Framework.Rectangle? currentBounds;
+-		if ((farmer = character as Farmer) != null)
++		Farmer farmer = character as Farmer;
++		bool hasCurrent;
++		Microsoft.Xna.Framework.Rectangle currentBounds;
++		if (farmer != null)
+ 		{
+ 			isFarmer = true;
++			hasCurrent = true;
+ 			currentBounds = farmer.GetBoundingBox();
+ 			passableTiles = farmer.TemporaryPassableTiles;
+ 		}
+ 		else
+ 		{
+-			farmer = null;
+ 			isFarmer = false;
+-			currentBounds = null;
+-		}
+-		Vector2? currentTopRight = null;
+-		Vector2? currentTopLeft = null;
+-		Vector2? currentBottomRight = null;
+-		Vector2? currentBottomLeft = null;
+-		Vector2? currentBottomMid = null;
+-		Vector2? currentTopMid = null;
+-		if (currentBounds.HasValue)
+-		{
+-			currentTopRight = new Vector2((currentBounds.Value.Right - 1) / 64, currentBounds.Value.Top / 64);
+-			currentTopLeft = new Vector2(currentBounds.Value.Left / 64, currentBounds.Value.Top / 64);
+-			currentBottomRight = new Vector2((currentBounds.Value.Right - 1) / 64, (currentBounds.Value.Bottom - 1) / 64);
+-			currentBottomLeft = new Vector2(currentBounds.Value.Left / 64, (currentBounds.Value.Bottom - 1) / 64);
+-			currentBottomMid = new Vector2(currentBounds.Value.Center.X / 64, (currentBounds.Value.Bottom - 1) / 64);
+-			currentTopMid = new Vector2(currentBounds.Value.Center.X / 64, currentBounds.Value.Top / 64);
++			hasCurrent = false;
++			currentBounds = default(Microsoft.Xna.Framework.Rectangle);
+ 		}
+ 		if (farmer?.bridge != null && farmer.onBridge.Value && position.Right >= farmer.bridge.bridgeBounds.X && position.Left <= farmer.bridge.bridgeBounds.Right)
+ 		{
+-			if (_TestCornersWorld(position.Top, position.Bottom, position.Left, position.Right, (int x, int y) => (y > farmer.bridge.bridgeBounds.Bottom || y < farmer.bridge.bridgeBounds.Top) ? true : false))
+-			{
+-				return true;
+-			}
+-			return false;
++			// The corners' tops and bottoms are the only y values _TestCornersWorld asked about.
++			return position.Top > farmer.bridge.bridgeBounds.Bottom || position.Top < farmer.bridge.bridgeBounds.Top || position.Bottom > farmer.bridge.bridgeBounds.Bottom || position.Bottom < farmer.bridge.bridgeBounds.Top;
+ 		}
+-		if (!glider)
++		CollisionTiles tiles = CollectCollisionTiles(position, hasCurrent, currentBounds);
++		if (!glider && !skipStaticBlockers)
+ 		{
+ 			if (character != null && animals.FieldDict.Count > 0 && !(character is FarmAnimal))
+ 			{
+ 				foreach (FarmAnimal animal in animals.Values)
+ 				{
+ 					Microsoft.Xna.Framework.Rectangle animalBounds = animal.GetBoundingBox();
+-					if (position.Intersects(animalBounds) && (!currentBounds.HasValue || !currentBounds.Value.Intersects(animalBounds)) && (passableTiles == null || !passableTiles.Intersects(position)))
++					if (position.Intersects(animalBounds) && (!hasCurrent || !currentBounds.Intersects(animalBounds)) && (passableTiles == null || !passableTiles.Intersects(position)))
+ 					{
+ 						if (!skipCollisionEffects)
+ 						{
+@@ -2426,7 +3059,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			{
+ 				foreach (Building b in buildings)
+ 				{
+-					if (!b.intersects(position) || (currentBounds.HasValue && b.intersects(currentBounds.Value)))
++					if (!b.intersects(position) || (hasCurrent && b.intersects(currentBounds)))
+ 					{
+ 						continue;
+ 					}
+@@ -2466,7 +3099,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 				foreach (ResourceClump resourceClump in resourceClumps)
+ 				{
+ 					Microsoft.Xna.Framework.Rectangle bounds = resourceClump.getBoundingBox();
+-					if (bounds.Intersects(position) && (!currentBounds.HasValue || !bounds.Intersects(currentBounds.Value)))
++					if (bounds.Intersects(position) && (!hasCurrent || !bounds.Intersects(currentBounds)))
+ 					{
+ 						return true;
+ 					}
+@@ -2476,7 +3109,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			{
+ 				foreach (Furniture f in furniture)
+ 				{
+-					if (f.furniture_type.Value != 12 && f.IntersectsForCollision(position) && (!currentBounds.HasValue || !f.IntersectsForCollision(currentBounds.Value)))
++					if (f.furniture_type.Value != 12 && f.IntersectsForCollision(position) && (!hasCurrent || !f.IntersectsForCollision(currentBounds)))
+ 					{
+ 						return true;
+ 					}
+@@ -2485,10 +3118,12 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			NetCollection<LargeTerrainFeature> netCollection = largeTerrainFeatures;
+ 			if (netCollection != null && netCollection.Count > 0)
+ 			{
+-				foreach (LargeTerrainFeature largeTerrainFeature in largeTerrainFeatures)
++				int largeTerrainFeatureCount;
++				Microsoft.Xna.Framework.Rectangle[] largeTerrainFeatureBounds = GetLargeTerrainFeatureBounds(out largeTerrainFeatureCount);
++				for (int ltf = 0; ltf < largeTerrainFeatureCount; ltf++)
+ 				{
+-					Microsoft.Xna.Framework.Rectangle bounds2 = largeTerrainFeature.getBoundingBox();
+-					if (bounds2.Intersects(position) && (!currentBounds.HasValue || !bounds2.Intersects(currentBounds.Value)))
++					Microsoft.Xna.Framework.Rectangle bounds2 = largeTerrainFeatureBounds[ltf];
++					if (bounds2.Intersects(position) && (!hasCurrent || !bounds2.Intersects(currentBounds)))
+ 					{
+ 						return true;
+ 					}
+@@ -2497,49 +3132,88 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		}
+ 		if (!glider)
+ 		{
+-			if ((!is_event_up || (character != null && !isFarmer && (!pathfinding || !character.willDestroyObjectsUnderfoot))) && _TestCornersTiles(nextTopRight, nextTopLeft, nextBottomRight, nextBottomLeft, nextTopMid, nextBottomMid, currentTopRight, currentTopLeft, currentBottomRight, currentBottomLeft, currentTopMid, currentBottomMid, nextLargerThanTile, (Vector2 corner) =>
+-			{
+-				if (objects.TryGetValue(corner, out var value) && value != null)
+-				{
+-					if (value.isPassable())
+-					{
+-						return false;
+-					}
+-					Microsoft.Xna.Framework.Rectangle boundingBox = value.GetBoundingBox();
+-					if (boundingBox.Intersects(position) && (character == null || character.collideWith(value)))
+-					{
+-						if (character is FarmAnimal && value.isAnimalProduct())
++			// Port: the Mods menu's Passable Crops, for the local farmer's own steps only.
++			bool passableMod = VitaPassableCrops.Active && farmer != null && !pathfinding;
++			bool passableEffects = !skipCollisionEffects;
++			bool useVitaGrid = VitaPlatform.IsVita && (this == Game1.currentLocation || farmers.Count > 0 || isFarm.Value || animals.FieldDict.Count > 0 || characters.Count > 0);
++			// Objects on the tiles the box touches.
++			if (objects.Length > 0 && (!is_event_up || (character != null && !isFarmer && (!pathfinding || !character.willDestroyObjectsUnderfoot))))
++			{
++				Object[] objTiles = (useVitaGrid || _vitaObjectTiles != null) ? VitaObjectTiles() : null;
++				int objW = _vitaObjectTilesWidth;
++				int objH = _vitaObjectTilesHeight;
++				for (int i = 0; i < tiles.Count; i++)
++				{
++					int key = tiles.Get(i);
++					int tx = key >> 16;
++					int ty = (short)key;
++					Object obj = (objTiles != null) ? (((uint)tx < (uint)objW && (uint)ty < (uint)objH) ? objTiles[ty * objW + tx] : null) : (objects.TryGetValue(new Vector2(tx, ty), out var o) ? o : null);
++					if (obj != null)
++					{
++						if (obj.isPassable() || (passableMod && VitaPassableCrops.ObjectPasses(obj, farmer, position, passableEffects)))
+ 						{
+-							return false;
++							continue;
+ 						}
+-						if (passableTiles != null && passableTiles.Intersects(boundingBox))
++						Microsoft.Xna.Framework.Rectangle boundingBox = obj.GetBoundingBox();
++						if (boundingBox.Intersects(position) && (character == null || character.collideWith(obj)))
+ 						{
+-							return false;
++							if (character is FarmAnimal && obj.isAnimalProduct())
++							{
++								continue;
++							}
++							if (passableTiles != null && passableTiles.Intersects(boundingBox))
++							{
++								continue;
++							}
++							return true;
+ 						}
+-						return true;
+ 					}
+ 				}
+-				return false;
+-			}))
+-			{
+-				return true;
+ 			}
+-			_TestCornersTiles(nextTopRight, nextTopLeft, nextBottomRight, nextBottomLeft, nextTopMid, nextBottomMid, null, null, null, null, null, null, nextLargerThanTile, (Vector2 corner) =>
++			if (terrainFeatures.Length > 0)
+ 			{
+-				if (terrainFeatures.TryGetValue(corner, out var value) && value != null && value.getBoundingBox().Intersects(position) && !pathfinding && character != null && !skipCollisionEffects)
++				TerrainFeature[] featTiles = (useVitaGrid || _vitaFeatureTiles != null) ? VitaFeatureTiles() : null;
++				int featW = _vitaFeatureTilesWidth;
++				int featH = _vitaFeatureTilesHeight;
++				// Terrain features' reaction to being walked into (every tile, the player's own current ones included).
++				if (!pathfinding && character != null && !skipCollisionEffects)
+ 				{
+-					value.doCollisionAction(position, (int)((float)character.speed + character.addedSpeed), corner, character);
++					CollisionTiles allTiles = (hasCurrent ? CollectCollisionTiles(position, false, default(Microsoft.Xna.Framework.Rectangle)) : tiles);
++					for (int j = 0; j < allTiles.Count; j++)
++					{
++						int key2 = allTiles.Get(j);
++						int tx2 = key2 >> 16;
++						int ty2 = (short)key2;
++						TerrainFeature feature = (featTiles != null) ? (((uint)tx2 < (uint)featW && (uint)ty2 < (uint)featH) ? featTiles[ty2 * featW + tx2] : null) : (terrainFeatures.TryGetValue(new Vector2(tx2, ty2), out var f) ? f : null);
++						if (feature != null && feature.getBoundingBox().Intersects(position))
++						{
++							feature.doCollisionAction(position, (int)((float)character.speed + character.addedSpeed), new Vector2(tx2, ty2), character);
++						}
++					}
++				}
++				for (int k = 0; k < tiles.Count; k++)
++				{
++					int key3 = tiles.Get(k);
++					int tx3 = key3 >> 16;
++					int ty3 = (short)key3;
++					TerrainFeature feature2 = (featTiles != null) ? (((uint)tx3 < (uint)featW && (uint)ty3 < (uint)featH) ? featTiles[ty3 * featW + tx3] : null) : (terrainFeatures.TryGetValue(new Vector2(tx3, ty3), out var f2) ? f2 : null);
++					if (feature2 != null && feature2.getBoundingBox().Intersects(position) && !feature2.isPassable(character) && !(passableMod && VitaPassableCrops.FeaturePasses(feature2, farmer, position, passableEffects)))
++					{
++						return true;
++					}
+ 				}
+-				return false;
+-			});
+-			if (_TestCornersTiles(nextTopRight, nextTopLeft, nextBottomRight, nextBottomLeft, nextTopMid, nextBottomMid, currentTopRight, currentTopLeft, currentBottomRight, currentBottomLeft, currentTopMid, currentBottomMid, nextLargerThanTile, (Vector2 corner) => (terrainFeatures.TryGetValue(corner, out var value) && value != null && value.getBoundingBox().Intersects(position) && !value.isPassable(character)) ? true : false))
+-			{
+-				return true;
+ 			}
+ 		}
+-		if (character != null && character.hasSpecialCollisionRules() && (character.isColliding(this, nextTopRight) || character.isColliding(this, nextTopLeft) || character.isColliding(this, nextBottomRight) || character.isColliding(this, nextBottomLeft)))
++		if (character != null && character.hasSpecialCollisionRules())
+ 		{
+-			return true;
++			int nextRight = position.Right / 64;
++			int nextLeft = position.Left / 64;
++			int nextTop = position.Top / 64;
++			int nextBottom = position.Bottom / 64;
++			if (character.isColliding(this, new Vector2(nextRight, nextTop)) || character.isColliding(this, new Vector2(nextLeft, nextTop)) || character.isColliding(this, new Vector2(nextRight, nextBottom)) || character.isColliding(this, new Vector2(nextLeft, nextBottom)))
++			{
++				return true;
++			}
+ 		}
+ 		if (((isFarmer && (currentEvent == null || currentEvent.playerControlSequence)) || (character != null && character.collidesWithOtherCharacters.Value)) && !pathfinding)
+ 		{
+@@ -2572,13 +3246,13 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 				}
+ 			}
+ 		}
+-		Layer back_layer = map.RequireLayer("Back");
+-		Layer buildings_layer = map.RequireLayer("Buildings");
+-		Tile t;
++		EnsureCollisionLayers();
++		Layer back_layer = _cachedBackLayer ?? map.RequireLayer("Back");
++		bool doNpcBarrier = false;
+ 		if (isFarmer)
+ 		{
+-			Event obj = currentEvent;
+-			if (obj != null && obj.checkForCollision(position, (character as Farmer) ?? Game1.player))
++			Event obj2 = currentEvent;
++			if (obj2 != null && obj2.checkForCollision(position, (character as Farmer) ?? Game1.player))
+ 			{
+ 				return true;
+ 			}
+@@ -2595,136 +3269,113 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 					}
+ 				}
+ 			}
+-			if ((isFarm.Value || MineShaft.IsGeneratedLevel(this) || this is IslandLocation) && character != null && !character.Name.Contains("NPC") && !character.EventActor && !glider)
+-			{
+-				if (_TestCornersTiles(nextTopRight, nextTopLeft, nextBottomRight, nextBottomLeft, nextTopMid, nextBottomMid, currentTopRight, currentTopLeft, currentBottomRight, currentBottomLeft, currentTopMid, currentBottomMid, nextLargerThanTile, (Vector2 vector) =>
+-				{
+-					t = back_layer.Tiles[(int)vector.X, (int)vector.Y];
+-					return (t != null && t.Properties.ContainsKey("NPCBarrier")) ? true : false;
+-				}))
+-				{
+-					return true;
+-				}
+-			}
++			doNpcBarrier = (isFarm.Value || MineShaft.IsGeneratedLevel(this) || this is IslandLocation) && character != null && !character.NameContainsNPC && !character.EventActor && !glider;
+ 			if (glider && !projectile)
+ 			{
+ 				return false;
+ 			}
+ 		}
+-		if (!isFarmer || !Game1.player.isRafting)
+-		{
+-			if (_TestCornersTiles(nextTopRight, nextTopLeft, nextBottomRight, nextBottomLeft, nextTopMid, nextBottomMid, currentTopRight, currentTopLeft, currentBottomRight, currentBottomLeft, currentTopMid, currentBottomMid, nextLargerThanTile, (Vector2 vector) =>
+-			{
+-				t = back_layer.Tiles[(int)vector.X, (int)vector.Y];
+-				return (t != null && t.Properties.ContainsKey("TemporaryBarrier")) ? true : false;
+-			}))
+-			{
+-				return true;
+-			}
+-		}
+-		if (!isFarmer || !Game1.player.isRafting)
++		if (isFarmer && Game1.player.isRafting)
+ 		{
+-			if ((!(character is FarmAnimal animal3) || !animal3.IsActuallySwimming()) && _TestCornersTiles(nextTopRight, nextTopLeft, nextBottomRight, nextBottomLeft, nextTopMid, nextBottomMid, currentTopRight, currentTopLeft, currentBottomRight, currentBottomLeft, currentTopMid, currentBottomMid, nextLargerThanTile, (Vector2 vector) =>
++			// Rafting: the player may only stay on water.
++			for (int m = 0; m < tiles.Count; m++)
+ 			{
+-				Tile tile2 = back_layer.Tiles[(int)vector.X, (int)vector.Y];
+-				if (tile2 != null)
++				int key4 = tiles.Get(m);
++				int x = key4 >> 16;
++				int y = (short)key4;
++				Tile waterTile = back_layer.Tiles[x, y];
++				if (waterTile == null || !waterTile.TileIndexProperties.ContainsKey("Water"))
+ 				{
+-					bool flag = tile2.TileIndexProperties.ContainsKey("Passable");
+-					if (!flag)
+-					{
+-						flag = tile2.Properties.ContainsKey("Passable");
+-					}
+-					if (flag)
++					if (IsTileBlockedBy(new Vector2(x, y)))
+ 					{
+-						if (passableTiles != null && passableTiles.Contains((int)vector.X, (int)vector.Y))
+-						{
+-							return false;
+-						}
+-						return true;
++						Game1.player.isRafting = false;
++						Game1.player.Position = new Vector2(x * 64, y * 64 - 32);
++						Game1.player.setTrajectory(0, 0);
+ 					}
++					return true;
+ 				}
+-				return false;
+-			}))
++			}
++			return false;
++		}
++		// The NPC barrier, temporary barrier and "Passable" tests of the back layer: all three only read, and any
++		// one of them on any tile is a collision, so one pass over the tiles answers them in turn.
++		bool swimmingAnimal = character is FarmAnimal animal3 && animal3.IsActuallySwimming();
++		for (int n = 0; n < tiles.Count; n++)
++		{
++			int key5 = tiles.Get(n);
++			Tile backTile = back_layer.Tiles[key5 >> 16, (short)key5];
++			if (backTile == null)
++			{
++				continue;
++			}
++			IPropertyCollection backProperties = backTile.PropertiesIfAny;
++			if (backProperties != null && ((doNpcBarrier && backProperties.ContainsKey("NPCBarrier")) || backProperties.ContainsKey("TemporaryBarrier")))
+ 			{
+ 				return true;
+ 			}
+-			if (character == null || character.shouldCollideWithBuildingLayer(this))
++			if (!swimmingAnimal && (backTile.TileIndexProperties.ContainsKey("Passable") || TileHasOwnProperty(backProperties, "Passable")))
+ 			{
+-				Tile tmp;
+-				if (_TestCornersTiles(nextTopRight, nextTopLeft, nextBottomRight, nextBottomLeft, nextTopMid, nextBottomMid, currentTopRight, currentTopLeft, currentBottomRight, currentBottomLeft, currentTopMid, currentBottomMid, nextLargerThanTile, (Vector2 vector) =>
+-				{
+-					tmp = buildings_layer.Tiles[(int)vector.X, (int)vector.Y];
+-					if (tmp != null)
+-					{
+-						if (projectile && this is VolcanoDungeon)
+-						{
+-							Tile tile2 = back_layer.Tiles[(int)vector.X, (int)vector.Y];
+-							if (tile2 != null)
+-							{
+-								if (tile2.TileIndexProperties.ContainsKey("Water"))
+-								{
+-									return false;
+-								}
+-								if (tile2.Properties.ContainsKey("Water"))
+-								{
+-									return false;
+-								}
+-							}
+-						}
+-						if (!tmp.TileIndexProperties.ContainsKey("Shadow") && !tmp.TileIndexProperties.ContainsKey("Passable") && !tmp.Properties.ContainsKey("Passable") && (!projectile || (!tmp.TileIndexProperties.ContainsKey("ProjectilePassable") && !tmp.Properties.ContainsKey("ProjectilePassable"))) && (isFarmer || (!tmp.TileIndexProperties.ContainsKey("NPCPassable") && !tmp.Properties.ContainsKey("NPCPassable") && (!object.Equals(true, character?.canPassThroughActionTiles()) || !tmp.Properties.ContainsKey("Action")))))
+-						{
+-							if (passableTiles != null)
+-							{
+-								return !passableTiles.Contains((int)vector.X, (int)vector.Y);
+-							}
+-							return true;
+-						}
+-					}
+-					return false;
+-				}))
++				if (passableTiles != null && passableTiles.Contains(key5 >> 16, (short)key5))
+ 				{
+-					return true;
++					continue;
+ 				}
++				return true;
+ 			}
+-			if (!isFarmer && character?.controller != null && !skipCollisionEffects)
++		}
++		Layer buildings_layer = null;
++		if (character == null || character.shouldCollideWithBuildingLayer(this))
++		{
++			buildings_layer = _cachedBuildingsLayer ?? map.RequireLayer("Buildings");
++			for (int p = 0; p < tiles.Count; p++)
+ 			{
+-				Point tileLocation = new Point(position.Center.X / 64, position.Bottom / 64);
+-				Tile tile = buildings_layer.Tiles[tileLocation.X, tileLocation.Y];
+-				if (tile != null && tile.Properties.ContainsKey("Action"))
++				int key6 = tiles.Get(p);
++				int x2 = key6 >> 16;
++				int y2 = (short)key6;
++				Tile tmp = buildings_layer.Tiles[x2, y2];
++				if (tmp == null)
+ 				{
+-					openDoor(new Location(tileLocation.X, tileLocation.Y), Game1.currentLocation.Equals(this));
++					continue;
+ 				}
+-				else
++				if (projectile && this is VolcanoDungeon)
++				{
++					Tile waterBack = back_layer.Tiles[x2, y2];
++					if (waterBack != null && (waterBack.TileIndexProperties.ContainsKey("Water") || TileHasOwnProperty(waterBack.PropertiesIfAny, "Water")))
++					{
++						continue;
++					}
++				}
++				IPropertyCollection tmpIndexProperties = tmp.TileIndexProperties;
++				IPropertyCollection tmpProperties = tmp.PropertiesIfAny;
++				if (!tmpIndexProperties.ContainsKey("Shadow") && !tmpIndexProperties.ContainsKey("Passable") && !TileHasOwnProperty(tmpProperties, "Passable") && (!projectile || (!tmpIndexProperties.ContainsKey("ProjectilePassable") && !TileHasOwnProperty(tmpProperties, "ProjectilePassable"))) && (isFarmer || (!tmpIndexProperties.ContainsKey("NPCPassable") && !TileHasOwnProperty(tmpProperties, "NPCPassable") && (!(character != null && character.canPassThroughActionTiles()) || !TileHasOwnProperty(tmpProperties, "Action")))))
+ 				{
+-					tileLocation = new Point(position.Center.X / 64, position.Top / 64);
+-					tile = buildings_layer.Tiles[tileLocation.X, tileLocation.Y];
+-					if (tile != null && tile.Properties.ContainsKey("Action"))
++					if (passableTiles == null || !passableTiles.Contains(x2, y2))
+ 					{
+-						openDoor(new Location(tileLocation.X, tileLocation.Y), Game1.currentLocation.Equals(this));
++						return true;
+ 					}
+ 				}
+ 			}
+-			return false;
+ 		}
+-		if (_TestCornersTiles(nextTopRight, nextTopLeft, nextBottomRight, nextBottomLeft, nextTopMid, nextBottomMid, currentTopRight, currentTopLeft, currentBottomRight, currentBottomLeft, currentTopMid, currentBottomMid, nextLargerThanTile, (Vector2 vector) =>
++		if (!isFarmer && character?.controller != null && !skipCollisionEffects)
+ 		{
+-			t = back_layer.Tiles[(int)vector.X, (int)vector.Y];
+-			if (!object.Equals(true, t?.TileIndexProperties.ContainsKey("Water")))
++			if (buildings_layer == null)
++			{
++				buildings_layer = map.RequireLayer("Buildings");
++			}
++			Point tileLocation = new Point(position.Center.X / 64, position.Bottom / 64);
++			Tile tile = buildings_layer.Tiles[tileLocation.X, tileLocation.Y];
++			if (tile != null && TileHasOwnProperty(tile.PropertiesIfAny, "Action"))
++			{
++				openDoor(new Location(tileLocation.X, tileLocation.Y), Game1.currentLocation.Equals(this));
++			}
++			else
+ 			{
+-				int num = (int)vector.X;
+-				int num2 = (int)vector.Y;
+-				if (IsTileBlockedBy(new Vector2(num, num2)))
++				tileLocation = new Point(position.Center.X / 64, position.Top / 64);
++				tile = buildings_layer.Tiles[tileLocation.X, tileLocation.Y];
++				if (tile != null && TileHasOwnProperty(tile.PropertiesIfAny, "Action"))
+ 				{
+-					Game1.player.isRafting = false;
+-					Game1.player.Position = new Vector2(num * 64, num2 * 64 - 32);
+-					Game1.player.setTrajectory(0, 0);
++					openDoor(new Location(tileLocation.X, tileLocation.Y), Game1.currentLocation.Equals(this));
+ 				}
+-				return true;
+ 			}
+-			return false;
+-		}))
+-		{
+-			return true;
+ 		}
+ 		return false;
+ 	}
+@@ -3907,6 +4558,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		{
+ 			projectiles.RemoveWhere((Projectile projectile) => projectile.update(time, this));
+ 		}
++		long terrainStart = VitaPlatform.BeginHotSection();
+ 		for (int i2 = _activeTerrainFeatures.Count - 1; i2 >= 0; i2--)
+ 		{
+ 			TerrainFeature feature = _activeTerrainFeatures[i2];
+@@ -3915,6 +4567,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 				terrainFeatures.Remove(feature.Tile);
+ 			}
+ 		}
++		VitaPlatform.EndHotSection(VitaPlatform.HotSection.HereTerrain, terrainStart);
+ 		largeTerrainFeatures?.RemoveWhere((LargeTerrainFeature largeTerrainFeature) => largeTerrainFeature.tickUpdate(time));
+ 		foreach (ResourceClump resourceClump in resourceClumps)
+ 		{
+@@ -3942,12 +4595,21 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			}
+ 			while (continue_execution);
+ 		}
+-		objects.Lock();
+-		foreach (Object value in objects.Values)
++		long objectsStart = VitaPlatform.BeginHotSection();
++		if (VitaPlatform.IsVita)
+ 		{
+-			value.updateWhenCurrentLocation(time);
++			updateFrameUpdateObjects(time);
+ 		}
+-		objects.Unlock();
++		else
++		{
++			objects.Lock();
++			foreach (Object value in objects.Values)
++			{
++				value.updateWhenCurrentLocation(time);
++			}
++			objects.Unlock();
++		}
++		VitaPlatform.EndHotSection(VitaPlatform.HotSection.HereObjects, objectsStart);
+ 		Vector2 player_position;
+ 		if (Game1.gameMode == 3 && this == Game1.currentLocation)
+ 		{
+@@ -4076,15 +4738,53 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 	}
+ 
+ 	protected virtual void updateCharacters(GameTime time)
++	{
++		// Port (as the Miyoo Mini port does): most of the ~100 locations have no characters; skip the timing and shouldTimePass.
++		if (characters.Count == 0)
++		{
++			return;
++		}
++		long npcsStart = VitaPlatform.BeginHotSection();
++		_updateCharacters(time);
++		VitaPlatform.EndHotSection(VitaPlatform.HotSection.AllLocationsNpcs, npcsStart);
++	}
++
++	private void _updateCharacters(GameTime time)
+ 	{
+ 		bool shouldTimePass = Game1.shouldTimePass();
++		bool isCurrentLocation = this == Game1.currentLocation || farmers.Count > 0;
+ 		for (int i = characters.Count - 1; i >= 0; i--)
+ 		{
+ 			NPC character = characters[i];
+ 			if (character != null && (shouldTimePass || character is Horse || character.forceUpdateTimer > 0))
+ 			{
++				if (VitaPlatform.IsVita && !isCurrentLocation)
++				{
++					// Port: If NPC is in another location and is idle (not moving, no route controller),
++					// stagger updates every 16 ticks to eliminate 10% CPU burn from idle village NPCs.
++					if (character.controller == null && character.temporaryController == null && !character.isMoving() && character.currentScheduleDelay <= 0f)
++					{
++						if (((Game1.ticks + i) & 15) != 0)
++						{
++							continue;
++						}
++					}
++				}
+ 				character.currentLocation = this;
+-				character.update(time, this);
++				if (VitaPlatform.ProfileSections)
++				{
++					double npcStart = VitaPlatform.BeginSection();
++					character.update(time, this);
++					double npcSpent = VitaPlatform.ElapsedSince(npcStart);
++					if (npcSpent >= 15.0)
++					{
++						VitaPlatform.Trace($"slow: {character.Name} updating in {NameOrUniqueName} {npcSpent:F0} ms");
++					}
++				}
++				else
++				{
++					character.update(time, this);
++				}
+ 				if (i < characters.Count && character is Monster monster && monster.ShouldMonsterBeRemoved())
+ 				{
+ 					characters.RemoveAt(i);
+@@ -4132,21 +4832,105 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 				temporarySprites.RemoveAt(i);
+ 			}
+ 		}
+-		foreach (Building building in buildings)
++		// Port: no enumerator for the locations without buildings (nearly all of them, every tick).
++		if (buildings.Count > 0)
++		{
++			foreach (Building building in buildings)
++			{
++				building.updateWhenFarmNotCurrentLocation(time);
++			}
++		}
++		if (animals.Length > 0 && !Game1.currentLocation.Equals(this))
+ 		{
+-			building.updateWhenFarmNotCurrentLocation(time);
++			Building containingBuilding = ParentBuilding;
++			// Port: a reused snapshot instead of a new array per location with animals every tick (an
++			// animal update can move it to another location, so the loop can't run over animals itself).
++			List<FarmAnimal> snapshot = _animalUpdateSnapshot ?? new List<FarmAnimal>();
++			_animalUpdateSnapshot = null;
++			snapshot.AddRange(animals.Values);
++			if (VitaPlatform.IsVita && farmers.Count == 0)
++			{
++				// Port: time-slice remote animals when no player is in this location (e.g. Forest/Town/Mine)
++				// Updates each remote animal once every 4 ticks instead of all 15 every single frame.
++				for (int j = 0; j < snapshot.Count; j++)
++				{
++					FarmAnimal animal = snapshot[j];
++					if (((Game1.ticks + (int)(animal.myID.Value & 3)) & 3) == 0)
++					{
++						animal.updateWhenNotCurrentLocation(containingBuilding, time, this);
++					}
++				}
++			}
++			else
++			{
++				for (int j = 0; j < snapshot.Count; j++)
++				{
++					snapshot[j].updateWhenNotCurrentLocation(containingBuilding, time, this);
++				}
++			}
++			snapshot.Clear();
++			_animalUpdateSnapshot = snapshot;
++		}
++	}
++
++	/// <summary>Port: the objects that had something to do at the last scan (<see cref="Object.NeedsFrameUpdate" />).</summary>
++	private readonly List<Object> _frameUpdateObjects = new List<Object>();
++
++	private int _frameUpdateScanTick = int.MinValue;
++
++	private int _frameUpdateScanCount = -1;
++
++	/// <summary>Port: has an object updated each tick from now on, before the next scan finds it.</summary>
++	internal void QueueFrameUpdate(Object value)
++	{
++		if (VitaPlatform.IsVita && _frameUpdateScanCount >= 0 && !_frameUpdateObjects.Contains(value))
++		{
++			_frameUpdateObjects.Add(value);
++		}
++	}
++
++	/// <summary>Ticks between full scans of the objects for <see cref="_frameUpdateObjects" />.</summary>
++	private const int FrameUpdateScanTicks = 30;
++
++	/// <summary>
++	/// Port: the objects' per-tick update without visiting every object every tick. A big farm has
++	/// thousands of objects (stones, weeds, fences, machines) and almost all return at once, but visiting
++	/// them cost ~10% of the Vita's update (cache misses on every object). The ones with something to do
++	/// are listed by a full scan twice a second and whenever the object count changes; an object that
++	/// gets work in between (a machine filled, a shake from a tool) starts its update at the next scan.
++	/// </summary>
++	private void updateFrameUpdateObjects(GameTime time)
++	{
++		int count = objects.Length;
++		if (count != _frameUpdateScanCount || Game1.ticks - _frameUpdateScanTick >= FrameUpdateScanTicks || Game1.ticks < _frameUpdateScanTick)
++		{
++			_frameUpdateObjects.Clear();
++			foreach (Object value in objects.Values)
++			{
++				if (value.NeedsFrameUpdate)
++				{
++					_frameUpdateObjects.Add(value);
++				}
++			}
++			_frameUpdateScanTick = Game1.ticks;
++			_frameUpdateScanCount = count;
+ 		}
+-		if (!Game1.currentLocation.Equals(this) && animals.Length > 0)
++		objects.Lock();
++		for (int i = 0; i < _frameUpdateObjects.Count; i++)
+ 		{
+-			Building containingBuilding = ParentBuilding;
+-			FarmAnimal[] array = animals.Values.ToArray();
+-			for (int j = 0; j < array.Length; j++)
++			Object value = _frameUpdateObjects[i];
++			// Picked up or replaced since the scan: not this location's any more (its update could add its light back).
++			if (objects.TryGetValue(value.TileLocation, out Object current) && current == value)
+ 			{
+-				array[j].updateWhenNotCurrentLocation(containingBuilding, time, this);
++				value.updateWhenCurrentLocation(time);
+ 			}
+ 		}
++		objects.Unlock();
+ 	}
+ 
++	/// <summary>Port: the list <see cref="updateEvenIfFarmerIsntHere" /> snapshots animals into (location updates run on the main thread); taken while in use, so a nested update gets its own.</summary>
++	private static List<FarmAnimal> _animalUpdateSnapshot;
++
+ 	public GameLocation GetParentLocation()
+ 	{
+ 		if (parentLocationName.Value == null)
+@@ -4599,6 +5383,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		}
+ 		who?.leftRing.Value?.onMonsterSlay(monster, this, who);
+ 		who?.rightRing.Value?.onMonsterSlay(monster, this, who);
++		if (who != null)
++		{
++			VitaExtraRings.OnMonsterSlay(monster, this, who);
++		}
+ 		if (who != null && !isHutchSlime && !isBabySlime)
+ 		{
+ 			if (who.IsLocalPlayer)
+@@ -6507,7 +7295,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			if (!_madeMapModifications)
+ 			{
+ 				_madeMapModifications = true;
+-				MakeMapModifications();
++				// A map reloaded after UnloadMapForMemory is fresh from disk: re-apply everything.
++				bool force = _forceMapModificationsOnEntry;
++				_forceMapModificationsOnEntry = false;
++				MakeMapModifications(force);
+ 			}
+ 		});
+ 		Microsoft.Xna.Framework.Rectangle player_bounds = Game1.player.GetBoundingBox();
+@@ -6519,6 +7310,47 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 				Game1.player.TemporaryPassableTiles.Add(furnitureBounds);
+ 			}
+ 		}
++		if (VitaPlatform.IsVita)
++		{
++			PreloadDrawTextures();
++		}
++	}
++
++	/// <summary>
++	/// Port: the textures of the location's buildings, fences and furniture, read now (the screen is
++	/// still faded) instead of when each first comes into view: on a big farm walking around stalled
++	/// 50-150 ms per building or fence type (Big Barn, Stone Cabin, Fence1...). Content keeps them, so
++	/// this costs once per session and nothing the location wouldn't load anyway.
++	/// </summary>
++	private void PreloadDrawTextures()
++	{
++		try
++		{
++			foreach (Building building in buildings)
++			{
++				_ = building.texture?.Value;
++			}
++			HashSet<string> fenceKinds = new HashSet<string>();
++			foreach (Object value in objects.Values)
++			{
++				if (value is Fence fence && fenceKinds.Add(fence.ItemId))
++				{
++					_ = fence.fenceTexture?.Value;
++				}
++			}
++			HashSet<string> furnitureKinds = new HashSet<string>();
++			foreach (Furniture f in furniture)
++			{
++				if (furnitureKinds.Add(f.QualifiedItemId))
++				{
++					_ = ItemRegistry.GetDataOrErrorItem(f.QualifiedItemId).GetTexture();
++				}
++			}
++		}
++		catch (Exception ex)
++		{
++			VitaPlatform.Trace("texture preload: " + ex.Message);
++		}
+ 	}
+ 
+ 	protected virtual void resetLocalState()
+@@ -6584,6 +7416,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			{
+ 				Game1.player.leftRing.Value.onNewLocation(Game1.player, this);
+ 			}
++			VitaExtraRings.OnNewLocation(Game1.player, this);
+ 		}
+ 		forceViewportPlayerFollow = Map.Properties.ContainsKey("ViewportFollowPlayer");
+ 		lastTouchActionLocation = Game1.player.Tile;
+@@ -6855,6 +7688,11 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 				break;
+ 			}
+ 		}
++		if (Game1.IsClient)
++		{
++			waterColor.MarkClean();
++			miniJukeboxTrack.MarkClean();
++		}
+ 	}
+ 
+ 	public LightSource getLightSource(string identifier)
+@@ -7464,7 +8302,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			}
+ 		}
+ 		Tile tile = map.RequireLayer("Buildings").PickTile(new Location(tileLocation.X * 64, tileLocation.Y * 64), viewport.Size);
+-		if (tile == null || !FrameworkExtensions.TryGetValue(tile.Properties, "Action", out var action))
++		if (tile == null || !FrameworkExtensions.TryGetValue(tile.PropertiesIfAny, "Action", out var action))
+ 		{
+ 			action = doesTileHaveProperty(tileLocation.X, tileLocation.Y, "Action", "Buildings");
+ 		}
+@@ -10859,12 +11697,18 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		AmbientLocationSounds.onLocationLeave();
+ 		Game1.player.rightRing.Value?.onLeaveLocation(Game1.player, this);
+ 		Game1.player.leftRing.Value?.onLeaveLocation(Game1.player, this);
++		VitaExtraRings.OnLeaveLocation(Game1.player, this);
+ 		if (name.Equals("AbandonedJojaMart") && farmers.Count <= 1)
+ 		{
+ 			characters.RemoveWhere((NPC npc) => npc is Junimo);
+ 		}
+ 		furnitureToRemove.Clear();
+ 		interiorDoors.CleanUpLocalState();
++		if (farmers.Count <= 1)
++		{
++			_vitaFeatureTiles = null;
++			_vitaObjectTiles = null;
++		}
+ 		Game1.temporaryContent.Unload();
+ 		Utility.CollectGarbage();
+ 	}
+@@ -12699,7 +13543,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			Tile tile = map.GetLayer(layerName)?.Tiles[xTile, yTile];
+ 			if (tile != null)
+ 			{
+-				if (FrameworkExtensions.TryGetValue(tile.Properties, propertyName, out var propertyValue))
++				if (FrameworkExtensions.TryGetValue(tile.PropertiesIfAny, propertyName, out var propertyValue))
+ 				{
+ 					return propertyValue;
+ 				}
+@@ -13110,8 +13954,16 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		}
+ 	}
+ 
++	/// <summary>Port: set by Game1 while the clock's tick runs on the Vita; <see cref="passTimeForObjects" /> then queues its pass for the next frames (Game1.VitaQueueObjectPass).</summary>
++	public static bool VitaDeferObjectPasses;
++
+ 	public void passTimeForObjects(int timeElapsed)
+ 	{
++		if (VitaDeferObjectPasses)
++		{
++			Game1.VitaQueueObjectPass(this, timeElapsed);
++			return;
++		}
+ 		objects.Lock();
+ 		foreach (KeyValuePair<Vector2, Object> pair in objects.Pairs)
+ 		{
+@@ -13124,12 +13976,12 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		objects.Unlock();
+ 	}
+ 
+-	public virtual void performTenMinuteUpdate(int timeOfDay)
++	/// <summary>Port: set while Game1 runs the rest of a location's ten-minute update a few frames late (Vita), its characters' part having run on time (<see cref="VitaTenMinuteCharacters" />).</summary>
++	public static bool VitaCharactersAlreadyUpdated;
++
++	/// <summary>The characters' part of <see cref="performTenMinuteUpdate" />: schedules and their own ten-minute updates.</summary>
++	public void VitaTenMinuteCharacters(int timeOfDay)
+ 	{
+-		for (int i = 0; i < furniture.Count; i++)
+-		{
+-			furniture[i].minutesElapsed(10);
+-		}
+ 		for (int j = 0; j < characters.Count; j++)
+ 		{
+ 			NPC character = characters[j];
+@@ -13139,6 +13991,44 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 				character.performTenMinuteUpdate(timeOfDay, this);
+ 			}
+ 		}
++	}
++
++	private static readonly Dictionary<Type, bool> _vitaSplitTypes = new Dictionary<Type, bool>();
++
++	/// <summary>Port: whether the Vita may run this location's ten-minute update in two parts, the characters' part on time and the rest a few frames later, with the same outcome.</summary>
++	/// <remarks>
++	/// Only when nothing in the late part touches a character or another location: no buildings (their interiors'
++	/// updates, characters included, run from <see cref="timeUpdate" />), no farm animals (they move between locations
++	/// there), and either the base update or an override checked to leave characters alone (Farm, FarmHouse, Beach and
++	/// Forest handle spouses, pets and derby contestants in theirs, so they stay whole).
++	/// </remarks>
++	public bool VitaCanSplitTenMinuteUpdate()
++	{
++		if (buildings.Count > 0 || animals.Length > 0)
++		{
++			return false;
++		}
++		Type type = GetType();
++		if (!_vitaSplitTypes.TryGetValue(type, out bool split))
++		{
++			Type declaring = type.GetMethod("performTenMinuteUpdate", new Type[1] { typeof(int) })?.DeclaringType;
++			split = declaring == typeof(GameLocation) || declaring == typeof(Town) || declaring == typeof(Desert) || declaring == typeof(Submarine) || declaring == typeof(BeachNightMarket) || declaring == typeof(FarmCave) || declaring == typeof(DesertFestival);
++			split &= type.GetMethod("timeUpdate", new Type[1] { typeof(int) })?.DeclaringType == typeof(GameLocation);
++			_vitaSplitTypes[type] = split;
++		}
++		return split;
++	}
++
++	public virtual void performTenMinuteUpdate(int timeOfDay)
++	{
++		for (int i = 0; i < furniture.Count; i++)
++		{
++			furniture[i].minutesElapsed(10);
++		}
++		if (!VitaCharactersAlreadyUpdated)
++		{
++			VitaTenMinuteCharacters(timeOfDay);
++		}
+ 		passTimeForObjects(10);
+ 		if (isOutdoors.Value)
+ 		{
+@@ -15180,11 +16070,19 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		{
+ 			return;
+ 		}
+-		for (int y = Math.Max(0, Game1.viewport.Y / 64 - 1); y < Math.Min(map.Layers[0].LayerHeight, (Game1.viewport.Y + Game1.viewport.Height) / 64 + 2); y++)
++		var baseLayer = map.Layers[0];
++		int mapHeight = baseLayer.LayerHeight;
++		int mapWidth = baseLayer.LayerWidth;
++		int startY = Math.Max(0, Game1.viewport.Y / 64 - 1);
++		int endY = Math.Min(mapHeight, (Game1.viewport.Y + Game1.viewport.Height) / 64 + 2);
++		int startX = Math.Max(0, Game1.viewport.X / 64 - 1);
++		int endX = Math.Min(mapWidth, (Game1.viewport.X + Game1.viewport.Width) / 64 + 1);
++		var wt = waterTiles.waterTiles;
++		for (int y = startY; y < endY; y++)
+ 		{
+-			for (int x = Math.Max(0, Game1.viewport.X / 64 - 1); x < Math.Min(map.Layers[0].LayerWidth, (Game1.viewport.X + Game1.viewport.Width) / 64 + 1); x++)
++			for (int x = startX; x < endX; x++)
+ 			{
+-				if (waterTiles.waterTiles[x, y].isWater && waterTiles.waterTiles[x, y].isVisible)
++				if (wt[x, y].isWater && wt[x, y].isVisible)
+ 				{
+ 					drawWaterTile(b, x, y);
+ 				}
+@@ -15199,21 +16097,331 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 
+ 	public void drawWaterTile(SpriteBatch b, int x, int y, Color color)
+ 	{
+-		bool num = y == map.Layers[0].LayerHeight - 1 || !waterTiles[x, y + 1];
+-		bool topY = y == 0 || !waterTiles[x, y - 1];
+-		b.Draw(Game1.mouseCursors, Game1.GlobalToLocal(Game1.viewport, new Vector2(x * 64, y * 64 - (int)((!topY) ? waterPosition : 0f))), new Microsoft.Xna.Framework.Rectangle(waterAnimationIndex * 64, 2064 + (((x + y) % 2 != 0) ? ((!waterTileFlip) ? 128 : 0) : (waterTileFlip ? 128 : 0)) + (topY ? ((int)waterPosition) : 0), 64, 64 + (topY ? ((int)(0f - waterPosition)) : 0)), color, 0f, Vector2.Zero, 1f, SpriteEffects.None, 0.56f);
++		var wt = waterTiles.waterTiles;
++		int mapH = wt.GetLength(1);
++		bool num = y >= mapH - 1 || !wt[x, y + 1].isWater;
++		bool topY = y <= 0 || !wt[x, y - 1].isWater;
++		int intWaterPos = (int)waterPosition;
++		b.Draw(Game1.mouseCursors, Game1.GlobalToLocal(Game1.viewport, new Vector2(x * 64, y * 64 - ((!topY) ? intWaterPos : 0))), new Microsoft.Xna.Framework.Rectangle(waterAnimationIndex * 64, 2064 + (((x + y) % 2 != 0) ? ((!waterTileFlip) ? 128 : 0) : (waterTileFlip ? 128 : 0)) + (topY ? intWaterPos : 0), 64, 64 + (topY ? (-intWaterPos) : 0)), color, 0f, Vector2.Zero, 1f, SpriteEffects.None, 0.56f);
+ 		if (num)
+ 		{
+-			b.Draw(Game1.mouseCursors, Game1.GlobalToLocal(Game1.viewport, new Vector2(x * 64, (y + 1) * 64 - (int)waterPosition)), new Microsoft.Xna.Framework.Rectangle(waterAnimationIndex * 64, 2064 + (((x + (y + 1)) % 2 != 0) ? ((!waterTileFlip) ? 128 : 0) : (waterTileFlip ? 128 : 0)), 64, 64 - (int)(64f - waterPosition) - 1), color, 0f, Vector2.Zero, 1f, SpriteEffects.None, 0.56f);
++			b.Draw(Game1.mouseCursors, Game1.GlobalToLocal(Game1.viewport, new Vector2(x * 64, (y + 1) * 64 - intWaterPos)), new Microsoft.Xna.Framework.Rectangle(waterAnimationIndex * 64, 2064 + (((x + (y + 1)) % 2 != 0) ? ((!waterTileFlip) ? 128 : 0) : (waterTileFlip ? 128 : 0)), 64, 64 - (64 - intWaterPos) - 1), color, 0f, Vector2.Zero, 1f, SpriteEffects.None, 0.56f);
++		}
++	}
++
++	/// <summary>Port: the draw passes probed the terrain feature / object dictionaries once per visible tile (850 hashed lookups, ~4% of a frame on the Vita). When the dictionary holds no more than a few entries per visible tile it is cheaper to walk it once and drop the entries inside the window into a grid, then visit the grid in the original y-then-x order. Nothing is drawn while the dictionary is walked, so the result matches the per-tile probe (draw code doesn't add or remove terrain features or objects).</summary>
++	private const int DrawGridMaxTiles = 4096;
++
++	private const int DrawGridEntriesPerTile = 3;
++
++	private static TerrainFeature[] _drawFeatureGrid = new TerrainFeature[0];
++
++	private static bool _drawFeatureGridBusy;
++
++	private static Object[] _drawObjectGrid = new Object[0];
++
++	private static bool _drawObjectGridBusy;
++
++	/// <summary>The terrain features inside the window (grid index (y - y0) * w + (x - x0)), or null if the caller should probe tile by tile instead. Call <see cref="ReleaseTerrainFeatureGrid" /> when done with a non-null grid.</summary>
++	/// <summary>Port: changes to <see cref="terrainFeatures" /> (added, removed, replaced), counted by its events, for the per-tile index below and Game1's cached floor.</summary>
++	[XmlIgnore]
++	public int VitaTerrainVersion;
++
++	/// <summary>Port: the terrain features by tile over the whole map (index y * width + x), so the draw passes read their window from it instead of walking the dictionary twice a frame: on a big farm with thousands of features (paths, tilled soil, grass, trees) the walks were ~4% of a frame. Rebuilt when <see cref="VitaTerrainVersion" />, the count or the map size changes, and at least once a second in case a feature changed without an event.</summary>
++	private TerrainFeature[] _vitaFeatureTiles;
++
++	private int _vitaFeatureTilesWidth;
++
++	private int _vitaFeatureTilesHeight;
++
++	private int _vitaFeatureTilesVersion = int.MinValue;
++
++	private int _vitaFeatureTilesCount = -1;
++
++	private int _vitaFeatureTilesTick = int.MinValue;
++
++	private bool _vitaHasGrass;
++
++	internal bool VitaHasGrass
++	{
++		get
++		{
++			if (terrainFeatures.Length == 0)
++			{
++				return false;
++			}
++			VitaFeatureTiles();
++			return _vitaHasGrass;
++		}
++	}
++
++	internal TerrainFeature VitaFeatureAt(int x, int y)
++	{
++		if (terrainFeatures.Length == 0)
++		{
++			return null;
++		}
++		if (VitaPlatform.IsVita)
++		{
++			TerrainFeature[] featTiles = VitaFeatureTiles();
++			if (featTiles != null)
++			{
++				return ((uint)x < (uint)_vitaFeatureTilesWidth && (uint)y < (uint)_vitaFeatureTilesHeight) ? featTiles[y * _vitaFeatureTilesWidth + x] : null;
++			}
++		}
++		return terrainFeatures.TryGetValue(new Vector2(x, y), out var f) ? f : null;
++	}
++
++	private TerrainFeature[] VitaFeatureTiles()
++	{
++		EnsureCollisionLayers();
++		xTile.Layers.Layer back = _cachedBackLayer ?? (map?.Layers.Count > 0 ? map.Layers[0] : null);
++		if (back == null)
++		{
++			return null;
++		}
++		int width = back.LayerWidth;
++		int height = back.LayerHeight;
++		if (width <= 0 || height <= 0 || width * height > 65536)
++		{
++			return null;
++		}
++		int refreshTicks = (this == Game1.currentLocation) ? 60 : 600;
++		if (_vitaFeatureTiles != null && _vitaFeatureTilesWidth == width && _vitaFeatureTilesHeight == height && _vitaFeatureTilesVersion == VitaTerrainVersion && _vitaFeatureTilesCount == terrainFeatures.Length && Game1.ticks - _vitaFeatureTilesTick < refreshTicks && Game1.ticks >= _vitaFeatureTilesTick)
++		{
++			return _vitaFeatureTiles;
++		}
++		if (_vitaFeatureTiles == null || _vitaFeatureTiles.Length != width * height)
++		{
++			_vitaFeatureTiles = new TerrainFeature[width * height];
++		}
++		else
++		{
++			Array.Clear(_vitaFeatureTiles, 0, _vitaFeatureTiles.Length);
++		}
++		bool hasHoeDirt = false;
++		bool hasFlooring = false;
++		bool hasGrass = false;
++		foreach (KeyValuePair<Vector2, NetRef<TerrainFeature>> pair in terrainFeatures.FieldDict)
++		{
++			float keyX = pair.Key.X;
++			float keyY = pair.Key.Y;
++			int ix = (int)keyX;
++			int iy = (int)keyY;
++			if (ix >= 0 && ix < width && iy >= 0 && iy < height && (float)ix == keyX && (float)iy == keyY)
++			{
++				TerrainFeature feature = pair.Value.Value;
++				_vitaFeatureTiles[iy * width + ix] = feature;
++				hasHoeDirt |= feature is HoeDirt;
++				hasFlooring |= feature is Flooring;
++				hasGrass |= feature is Grass;
++			}
++		}
++		_vitaHasHoeDirt = hasHoeDirt;
++		_vitaHasFlooring = hasFlooring;
++		_vitaHasGrass = hasGrass;
++		_vitaFeatureTilesWidth = width;
++		_vitaFeatureTilesHeight = height;
++		_vitaFeatureTilesVersion = VitaTerrainVersion;
++		_vitaFeatureTilesCount = terrainFeatures.Length;
++		_vitaFeatureTilesTick = Game1.ticks;
++		return _vitaFeatureTiles;
++	}
++
++	private TerrainFeature[] GatherTerrainFeatures(int x0, int y0, int w, int h)
++	{
++		int area = w * h;
++		if (w <= 0 || h <= 0 || area > DrawGridMaxTiles || _drawFeatureGridBusy)
++		{
++			return null;
++		}
++		TerrainFeature[] tiles = VitaPlatform.IsVita ? VitaFeatureTiles() : null;
++		if (tiles == null && terrainFeatures.Length > area * DrawGridEntriesPerTile)
++		{
++			return null;
++		}
++		if (_drawFeatureGrid.Length < area)
++		{
++			_drawFeatureGrid = new TerrainFeature[area];
++		}
++		TerrainFeature[] grid = _drawFeatureGrid;
++		_drawFeatureGridBusy = true;
++		if (tiles != null)
++		{
++			int width = _vitaFeatureTilesWidth;
++			int height = _vitaFeatureTilesHeight;
++			int xFrom = Math.Max(x0, 0);
++			int xTo = Math.Min(x0 + w, width);
++			for (int y = Math.Max(y0, 0); y < y0 + h && y < height; y++)
++			{
++				int row = (y - y0) * w - x0;
++				int tileRow = y * width;
++				for (int x = xFrom; x < xTo; x++)
++				{
++					grid[row + x] = tiles[tileRow + x];
++				}
++			}
++			return grid;
++		}
++		foreach (KeyValuePair<Vector2, NetRef<TerrainFeature>> pair in terrainFeatures.FieldDict)
++		{
++			float keyX = pair.Key.X;
++			float keyY = pair.Key.Y;
++			int ix = (int)keyX;
++			int iy = (int)keyY;
++			if (ix >= x0 && ix < x0 + w && iy >= y0 && iy < y0 + h && (float)ix == keyX && (float)iy == keyY)
++			{
++				grid[(iy - y0) * w + (ix - x0)] = pair.Value.Value;
++			}
++		}
++		return grid;
++	}
++
++	private static void ReleaseTerrainFeatureGrid(int area)
++	{
++		Array.Clear(_drawFeatureGrid, 0, area);
++		_drawFeatureGridBusy = false;
++	}
++
++	/// <summary>The objects inside the window, like <see cref="GatherTerrainFeatures" />; call <see cref="ReleaseObjectGrid" /> when done with a non-null grid.</summary>
++	private Object[] GatherObjects(int x0, int y0, int w, int h)
++	{
++		int area = w * h;
++		if (w <= 0 || h <= 0 || area > DrawGridMaxTiles || _drawObjectGridBusy || objects.Length > area * DrawGridEntriesPerTile)
++		{
++			return null;
++		}
++		if (_drawObjectGrid.Length < area)
++		{
++			_drawObjectGrid = new Object[area];
++		}
++		Object[] grid = _drawObjectGrid;
++		_drawObjectGridBusy = true;
++		objects.GatherInto(grid, x0, y0, w, h);
++		return grid;
++	}
++
++	private static void ReleaseObjectGrid(int area)
++	{
++		Array.Clear(_drawObjectGrid, 0, area);
++		_drawObjectGridBusy = false;
++	}
++
++	private Object[] _vitaObjectTiles;
++
++	private int _vitaObjectTilesWidth;
++
++	private int _vitaObjectTilesHeight;
++
++	private int _vitaObjectTilesVersion = int.MinValue;
++
++	private int _vitaObjectTilesCount = -1;
++
++	private int _vitaObjectTilesTick = int.MinValue;
++
++	private Object[] VitaObjectTiles()
++	{
++		EnsureCollisionLayers();
++		xTile.Layers.Layer back = _cachedBackLayer ?? (map?.Layers.Count > 0 ? map.Layers[0] : null);
++		if (back == null)
++		{
++			return null;
++		}
++		int width = back.LayerWidth;
++		int height = back.LayerHeight;
++		if (width <= 0 || height <= 0 || width * height > 65536)
++		{
++			return null;
++		}
++		int refreshTicks = (this == Game1.currentLocation) ? 60 : 600;
++		if (_vitaObjectTiles != null && _vitaObjectTilesWidth == width && _vitaObjectTilesHeight == height && _vitaObjectTilesVersion == objects.Version && _vitaObjectTilesCount == objects.Length && Game1.ticks - _vitaObjectTilesTick < refreshTicks && Game1.ticks >= _vitaObjectTilesTick)
++		{
++			return _vitaObjectTiles;
++		}
++		if (_vitaObjectTiles == null || _vitaObjectTiles.Length != width * height)
++		{
++			_vitaObjectTiles = new Object[width * height];
++		}
++		else
++		{
++			Array.Clear(_vitaObjectTiles, 0, _vitaObjectTiles.Length);
++		}
++		objects.PopulateTileArray(_vitaObjectTiles, width, height);
++		_vitaObjectTilesWidth = width;
++		_vitaObjectTilesHeight = height;
++		_vitaObjectTilesVersion = objects.Version;
++		_vitaObjectTilesCount = objects.Length;
++		_vitaObjectTilesTick = Game1.ticks;
++		return _vitaObjectTiles;
++	}
++
++	/// <summary>Port: set while the world's sorted batch is drawn with the tilled soil already on screen from Game1's cached picture; drawAboveFrontLayer then draws only the crops of hoe dirt.</summary>
++	internal static bool VitaSoilFromCache;
++
++	/// <summary>Port: whether any terrain feature here is hoe dirt (checked when the per-tile index is rebuilt), so Game1 keeps no soil picture where there is none.</summary>
++	internal bool VitaHasHoeDirt
++	{
++		get
++		{
++			VitaFeatureTiles();
++			return _vitaHasHoeDirt;
++		}
++	}
++
++	private bool _vitaHasHoeDirt;
++
++	/// <summary>Port: whether any terrain feature here is a path or floor (like <see cref="VitaHasHoeDirt" />), so Game1 keeps no floor picture where there is none: an empty picture still costs a full-screen blend every frame.</summary>
++	internal bool VitaHasFlooring
++	{
++		get
++		{
++			VitaFeatureTiles();
++			return _vitaHasFlooring;
++		}
++	}
++
++	private bool _vitaHasFlooring;
++
++	/// <summary>Port: the tilled soil of the visible tiles (soil, watered overlay, fertilizer; no crops), for Game1's cached picture: the same tiles and draws as drawAboveFrontLayer's hoe dirt.</summary>
++	internal void VitaDrawSoil(SpriteBatch b)
++	{
++		int xStart = Game1.viewport.X / 64 - 1;
++		int xEnd = (Game1.viewport.X + Game1.viewport.Width) / 64 + 3;
++		int yStart = Game1.viewport.Y / 64 - 1;
++		int yEnd = (Game1.viewport.Y + Game1.viewport.Height) / 64 + 7;
++		TerrainFeature[] tiles = VitaFeatureTiles();
++		if (tiles == null)
++		{
++			return;
++		}
++		int width = _vitaFeatureTilesWidth;
++		int height = _vitaFeatureTilesHeight;
++		int xFrom = Math.Max(xStart, 0);
++		int xTo = Math.Min(xEnd, width);
++		int yFrom = Math.Max(yStart, 0);
++		int yTo = Math.Min(yEnd, height);
++		for (int y = yFrom; y < yTo; y++)
++		{
++			int row = y * width;
++			for (int x = xFrom; x < xTo; x++)
++			{
++				if (tiles[row + x] is HoeDirt dirt)
++				{
++					dirt.DrawOptimized(b, b, null);
++				}
++			}
+ 		}
+ 	}
+ 
++	/// <summary>Port: which parts drawFloorDecorations draws, for Game1's cached floor: 0 all, 1 only the paths and floors (into the cache), 2 everything but them (the building backgrounds and rugs, drawn live under the cached picture).</summary>
++	internal static int VitaFloorPass;
++
+ 	public virtual void drawFloorDecorations(SpriteBatch b)
+ 	{
+ 		int borderBuffer = 1;
+ 		Microsoft.Xna.Framework.Rectangle viewportRect = new Microsoft.Xna.Framework.Rectangle(Game1.viewport.X / 64 - borderBuffer, Game1.viewport.Y / 64 - borderBuffer, (int)Math.Ceiling((float)Game1.viewport.Width / 64f) + 2 * borderBuffer, (int)Math.Ceiling((float)Game1.viewport.Height / 64f) + 3 + 2 * borderBuffer);
+ 		Microsoft.Xna.Framework.Rectangle objectRectangle = default;
+-		if (buildings.Count > 0)
++		if (buildings.Count > 0 && VitaFloorPass != 1)
+ 		{
+ 			foreach (Building building in buildings)
+ 			{
+@@ -15229,18 +16437,47 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 				}
+ 			}
+ 		}
+-		if (!Game1.isFestival() && terrainFeatures.Length > 0)
++		if (!Game1.isFestival() && terrainFeatures.Length > 0 && VitaFloorPass != 2)
+ 		{
+-			Vector2 tile = default;
+-			for (int y = Game1.viewport.Y / 64 - 1; y < (Game1.viewport.Y + Game1.viewport.Height) / 64 + 7; y++)
++			// Port: see GatherTerrainFeatures; same tiles, same order, same draws.
++			int xStart = Game1.viewport.X / 64 - 1;
++			int xEnd = (Game1.viewport.X + Game1.viewport.Width) / 64 + 3;
++			int yStart = Game1.viewport.Y / 64 - 1;
++			int yEnd = (Game1.viewport.Y + Game1.viewport.Height) / 64 + 7;
++			TerrainFeature[] tiles = VitaPlatform.IsVita ? VitaFeatureTiles() : null;
++			if (tiles != null)
++			{
++				int width = _vitaFeatureTilesWidth;
++				int height = _vitaFeatureTilesHeight;
++				int xFrom = Math.Max(xStart, 0);
++				int xTo = Math.Min(xEnd, width);
++				int yFrom = Math.Max(yStart, 0);
++				int yTo = Math.Min(yEnd, height);
++				for (int y = yFrom; y < yTo; y++)
++				{
++					int row = y * width;
++					for (int x = xFrom; x < xTo; x++)
++					{
++						if (tiles[row + x] is Flooring flooring)
++						{
++							flooring.draw(b);
++						}
++					}
++				}
++			}
++			else
+ 			{
+-				for (int x = Game1.viewport.X / 64 - 1; x < (Game1.viewport.X + Game1.viewport.Width) / 64 + 3; x++)
++				Vector2 tile = default;
++				for (int y = Game1.viewport.Y / 64 - 1; y < (Game1.viewport.Y + Game1.viewport.Height) / 64 + 7; y++)
+ 				{
+-					tile.X = x;
+-					tile.Y = y;
+-					if (terrainFeatures.TryGetValue(tile, out var feat) && feat is Flooring)
++					for (int x = Game1.viewport.X / 64 - 1; x < (Game1.viewport.X + Game1.viewport.Width) / 64 + 3; x++)
+ 					{
+-						feat.draw(b);
++						tile.X = x;
++						tile.Y = y;
++						if (terrainFeatures.TryGetValue(tile, out var feat) && feat is Flooring)
++						{
++							feat.draw(b);
++						}
+ 					}
+ 				}
+ 			}
+@@ -15249,6 +16486,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		{
+ 			return;
+ 		}
++		if (VitaFloorPass == 1)
++		{
++			return;
++		}
+ 		Furniture.isDrawingLocationFurniture = true;
+ 		foreach (Furniture f in furniture)
+ 		{
+@@ -15320,13 +16561,20 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			}
+ 			if (d.itemId.Value != null)
+ 			{
+-				ParsedItemData itemData = ItemRegistry.GetDataOrErrorItem(d.itemId.Value);
++				// Port: use cached ParsedItemData on Vita to avoid ItemRegistry lookups every frame
++				ParsedItemData itemData = d.GetParsedItemData() ?? ItemRegistry.GetDataOrErrorItem(d.itemId.Value);
+ 				Texture2D texture = itemData.GetTexture();
+ 				float scale = ((d.debrisType.Value == Debris.DebrisType.RESOURCE || d.floppingFish.Value) ? 4f : (4f * (0.8f + (float)d.itemQuality * 0.1f)));
++				xTile.Dimensions.Rectangle vp = Game1.viewport;
+ 				for (int j = 0; j < d.Chunks.Count; j++)
+ 				{
+ 					Chunk chunk4 = d.Chunks[j];
+ 					Vector2 position5 = chunk4.GetVisualPosition();
++					// Port: cull off-screen debris chunks on Vita to save SpriteBatch and GPU draws
++					if (VitaPlatform.IsVita && (position5.X + 64f < vp.X || position5.X - 64f > vp.X + vp.Width || position5.Y + 64f < vp.Y || position5.Y - 64f > vp.Y + vp.Height))
++					{
++						continue;
++					}
+ 					Microsoft.Xna.Framework.Rectangle sourceRect = ((d.debrisType.Value == Debris.DebrisType.RESOURCE) ? itemData.GetSourceRect(chunk4.randomOffset) : itemData.GetSourceRect());
+ 					SpriteEffects spriteEffect = ((d.floppingFish.Value && chunk4.bounces % 2 == 0) ? SpriteEffects.FlipHorizontally : SpriteEffects.None);
+ 					b.Draw(texture, Utility.snapDrawPosition(Game1.GlobalToLocal(Game1.viewport, position5)), sourceRect, Color.White, 0f, Vector2.Zero, scale, spriteEffect, ((float)(d.chunkFinalYLevel + 32) + position5.X / 10000f) / 10000f);
+@@ -15335,11 +16583,17 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			}
+ 			else
+ 			{
++				xTile.Dimensions.Rectangle vp2 = Game1.viewport;
+ 				for (int k = 0; k < d.Chunks.Count; k++)
+ 				{
+-					Vector2 position6 = Utility.snapDrawPosition(Game1.GlobalToLocal(Game1.viewport, d.Chunks[k].position.Value));
++					Vector2 chunkPos = d.Chunks[k].position.Value;
++					if (VitaPlatform.IsVita && (chunkPos.X + 64f < vp2.X || chunkPos.X - 64f > vp2.X + vp2.Width || chunkPos.Y + 64f < vp2.Y || chunkPos.Y - 64f > vp2.Y + vp2.Height))
++					{
++						continue;
++					}
++					Vector2 position6 = Utility.snapDrawPosition(Game1.GlobalToLocal(Game1.viewport, chunkPos));
+ 					Microsoft.Xna.Framework.Rectangle sourceRect2 = Game1.getSourceRectForStandardTileSheet(Game1.debrisSpriteSheet, d.chunkType.Value + d.Chunks[k].randomOffset, 16, 16);
+-					float drawLayer = (d.Chunks[k].position.Y + 128f + d.Chunks[k].position.X / 10000f) / 10000f;
++					float drawLayer = (chunkPos.Y + 128f + chunkPos.X / 10000f) / 10000f;
+ 					b.Draw(Game1.debrisSpriteSheet, position6, sourceRect2, d.chunksColor.Value, 0f, Vector2.Zero, 4f * d.scale.Value, SpriteEffects.None, drawLayer);
+ 				}
+ 			}
+@@ -15475,16 +16729,46 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 		drawDebris(b);
+ 		if ((!Game1.eventUp || (currentEvent != null && currentEvent.showGroundObjects)) && objects.Length > 0)
+ 		{
+-			Vector2 tile = default;
+-			for (int y = Game1.viewport.Y / 64 - 1; y < (Game1.viewport.Y + Game1.viewport.Height) / 64 + 3; y++)
++			// Port: read directly from _vitaObjectTiles without full-map dictionary scan or per-frame Array.Clear.
++			int xStart = Game1.viewport.X / 64 - 1;
++			int xEnd = (Game1.viewport.X + Game1.viewport.Width) / 64 + 1;
++			int yStart = Game1.viewport.Y / 64 - 1;
++			int yEnd = (Game1.viewport.Y + Game1.viewport.Height) / 64 + 3;
++			Object[] objTiles = VitaPlatform.IsVita ? VitaObjectTiles() : null;
++			if (objTiles != null)
++			{
++				int width = _vitaObjectTilesWidth;
++				int height = _vitaObjectTilesHeight;
++				int xFrom = Math.Max(xStart, 0);
++				int xTo = Math.Min(xEnd, width);
++				int yFrom = Math.Max(yStart, 0);
++				int yTo = Math.Min(yEnd, height);
++				for (int y = yFrom; y < yTo; y++)
++				{
++					int row = y * width;
++					for (int x = xFrom; x < xTo; x++)
++					{
++						Object gridObject = objTiles[row + x];
++						if (gridObject != null)
++						{
++							gridObject.draw(b, x, y);
++						}
++					}
++				}
++			}
++			else
+ 			{
+-				for (int x = Game1.viewport.X / 64 - 1; x < (Game1.viewport.X + Game1.viewport.Width) / 64 + 1; x++)
++				Vector2 tile = default;
++				for (int y = Game1.viewport.Y / 64 - 1; y < (Game1.viewport.Y + Game1.viewport.Height) / 64 + 3; y++)
+ 				{
+-					tile.X = x;
+-					tile.Y = y;
+-					if (objects.TryGetValue(tile, out var o))
++					for (int x = Game1.viewport.X / 64 - 1; x < (Game1.viewport.X + Game1.viewport.Width) / 64 + 1; x++)
+ 					{
+-						o.draw(b, (int)tile.X, (int)tile.Y);
++						tile.X = x;
++						tile.Y = y;
++						if (objects.TryGetValue(tile, out var o))
++						{
++							o.draw(b, (int)tile.X, (int)tile.Y);
++						}
+ 					}
+ 				}
+ 			}
+@@ -15561,6 +16845,42 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 
+ 	public virtual void drawAboveFrontLayer(SpriteBatch b)
+ 	{
++		// Port: read directly from _vitaFeatureTiles without copying into _drawFeatureGrid or calling Array.Clear.
++		int xStart = Game1.viewport.X / 64 - 1;
++		int xEnd = (Game1.viewport.X + Game1.viewport.Width) / 64 + 3;
++		int yStart = Game1.viewport.Y / 64 - 1;
++		int yEnd = (Game1.viewport.Y + Game1.viewport.Height) / 64 + 7;
++		TerrainFeature[] tiles = VitaPlatform.IsVita ? VitaFeatureTiles() : null;
++		if (tiles != null)
++		{
++			int width = _vitaFeatureTilesWidth;
++			int height = _vitaFeatureTilesHeight;
++			int xFrom = Math.Max(xStart, 0);
++			int xTo = Math.Min(xEnd, width);
++			int yFrom = Math.Max(yStart, 0);
++			int yTo = Math.Min(yEnd, height);
++			for (int y = yFrom; y < yTo; y++)
++			{
++				int row = y * width;
++				for (int x = xFrom; x < xTo; x++)
++				{
++					TerrainFeature gridFeature = tiles[row + x];
++					if (gridFeature != null && !(gridFeature is Flooring))
++					{
++						if (VitaSoilFromCache && gridFeature is HoeDirt dirt)
++						{
++							// The soil is in Game1's cached picture: only the crop.
++							dirt.DrawOptimized(null, null, b);
++						}
++						else
++						{
++							gridFeature.draw(b);
++						}
++					}
++				}
++			}
++			return;
++		}
+ 		Vector2 tile = default;
+ 		for (int y = Game1.viewport.Y / 64 - 1; y < (Game1.viewport.Y + Game1.viewport.Height) / 64 + 7; y++)
+ 		{
+@@ -15821,7 +17141,15 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			try
+ 			{
+ 				tilesheet.ImageSource = GetSeasonalTilesheetName(tilesheet.ImageSource, GetSeasonKey());
+-				Game1.mapDisplayDevice.LoadTileSheet(tilesheet);
++				if (ShouldLoadTileSheetTextures)
++				{
++					Game1.mapDisplayDevice.LoadTileSheet(tilesheet);
++				}
++				else if (!Game1.content.DoesAssetExist<Texture2D>(tilesheet.ImageSource))
++				{
++					// Same fallback as a failed load below, without loading the texture.
++					throw new Microsoft.Xna.Framework.Content.ContentLoadException("Could not load " + tilesheet.ImageSource + " asset!");
++				}
+ 			}
+ 			catch (Exception exception)
+ 			{
+@@ -15829,7 +17157,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 				tilesheet.ImageSource = prevImageSource;
+ 			}
+ 		}
+-		map.LoadTileSheets(Game1.mapDisplayDevice);
++		if (ShouldLoadTileSheetTextures)
++		{
++			map.LoadTileSheets(Game1.mapDisplayDevice);
++		}
+ 	}
+ 
+ 	public static string GetSeasonalTilesheetName(string sheet_path, string current_season)
+@@ -16816,7 +18147,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			return true;
+ 		case 34:
+ 		{
+-			if (!FrameworkExtensions.TryGetValue(tile.Properties, "SpawnTree", out var property))
++			if (!FrameworkExtensions.TryGetValue(tile.PropertiesIfAny, "SpawnTree", out var property))
+ 			{
+ 				Game1.log.Warn(string.Format("Location '{0}' ignored path tile index 34 (spawn tree) at position {1} because the tile has no '{2}' tile property.", NameOrUniqueName, tile, "SpawnTree"));
+ 				break;
+@@ -16937,7 +18268,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 			for (int layerWidth = buildingLayer.LayerWidth; x < layerWidth; x++)
+ 			{
+ 				Tile tile = buildingLayer.Tiles[x, y];
+-				if (tile == null || !FrameworkExtensions.TryGetValue(tile.Properties, "Action", out var door) || !door.Contains("Warp"))
++				if (tile == null || !FrameworkExtensions.TryGetValue(tile.PropertiesIfAny, "Action", out var door) || !door.Contains("Warp"))
+ 				{
+ 					continue;
+ 				}
+@@ -17067,6 +18398,11 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 
+ 	protected void adjustMapLightPropertiesForLamp(int tile, int x, int y, string layer)
+ 	{
++		// Port: tiles that no case below handles are the vast majority; skip the layer/tilesheet lookup for them.
++		if (!isFarmBuildingInterior() && !(tile == 8 && layer == "Paths") && tile != 1346 && tile != 480 && tile != 826 && tile != 1344 && tile != 256 && tile != 225)
++		{
++			return;
++		}
+ 		string tilesheet = getTileSheetIDAt(x, y, layer);
+ 		if (isFarmBuildingInterior())
+ 		{
+@@ -17208,6 +18544,12 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+ 
+ 	public bool Equals(GameLocation other)
+ 	{
++		// Port: the same instance is always equal; skips two net-field reads and a name comparison,
++		// which the per-frame location updates do for every location.
++		if ((object)this == other)
++		{
++			return true;
++		}
+ 		if (other != null && isStructure.Get() == other.isStructure.Get())
+ 		{
+ 			return string.Equals(NameOrUniqueName, other.NameOrUniqueName, StringComparison.Ordinal);

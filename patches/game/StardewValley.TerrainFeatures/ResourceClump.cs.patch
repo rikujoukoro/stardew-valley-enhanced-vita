@@ -1,0 +1,13 @@
+diff --git a/StardewValley.TerrainFeatures/ResourceClump.cs b/StardewValley.TerrainFeatures/ResourceClump.cs
+index b6c4339a0baf69358ce182d2b273fa056c8fe3a0..bd5b9e89af9ac038e68df7700550fd6254409166 100644
+--- a/StardewValley.TerrainFeatures/ResourceClump.cs
++++ b/StardewValley.TerrainFeatures/ResourceClump.cs
+@@ -501,7 +501,7 @@ public class ResourceClump : TerrainFeature
+ 	{
+ 		if (shakeTimer > 0f)
+ 		{
+-			shakeTimer -= time.ElapsedGameTime.Milliseconds;
++			shakeTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 		}
+ 		else
+ 		{

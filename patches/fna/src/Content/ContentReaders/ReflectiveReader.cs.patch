@@ -1,0 +1,53 @@
+diff --git a/src/Content/ContentReaders/ReflectiveReader.cs b/src/Content/ContentReaders/ReflectiveReader.cs
+index af1325f0de8506e445765c49ba6564c0953ab347..91409349c396804e5c7e5b1676df4fcfb3851661 100644
+--- a/src/Content/ContentReaders/ReflectiveReader.cs
++++ b/src/Content/ContentReaders/ReflectiveReader.cs
+@@ -245,7 +245,10 @@ namespace Microsoft.Xna.Framework.Content
+ 				elementType = property.PropertyType;
+ 				if (property.CanWrite)
+ 				{
+-					setter = (o, v) => property.SetValue(o, v, null);
++					// Port: a delegate bound to the setter instead of PropertyInfo.SetValue per element; on the Vita
++					// the reflective call (argument conversion, generic-parameter checks) was ~20% of the main thread
++					// while Data\Shops and the other GameData assets were read, 1-2 s at every start of a save.
++					setter = FastPropertySetter.TryCreate(property) ?? ((o, v) => property.SetValue(o, v, null));
+ 				}
+ 				else
+ 				{
+@@ -297,4 +300,36 @@ namespace Microsoft.Xna.Framework.Content
+ 
+ 		#endregion
+ 	}
++
++	/// <summary>Port: setter delegates for class-typed content objects (see ReflectiveReader.GetElementReader).</summary>
++	internal static class FastPropertySetter
++	{
++		internal static Action<object, object> TryCreate(PropertyInfo property)
++		{
++			try
++			{
++				MethodInfo set = property.GetSetMethod(true);
++				Type owner = property.DeclaringType;
++				if (set == null || set.IsStatic || owner == null || !owner.IsClass || owner.ContainsGenericParameters || property.PropertyType.IsByRef || property.PropertyType.ContainsGenericParameters)
++				{
++					return null;
++				}
++				MethodInfo create = typeof(Binder<,>).MakeGenericType(owner, property.PropertyType).GetMethod("Create", BindingFlags.Static | BindingFlags.NonPublic);
++				return (Action<object, object>) create.Invoke(null, new object[] { set });
++			}
++			catch (Exception)
++			{
++				return null; // the reflective setter stays the fallback
++			}
++		}
++
++		private static class Binder<TOwner, TValue> where TOwner : class
++		{
++			internal static Action<object, object> Create(MethodInfo set)
++			{
++				Action<TOwner, TValue> bound = (Action<TOwner, TValue>) Delegate.CreateDelegate(typeof(Action<TOwner, TValue>), set);
++				return (o, v) => bound((TOwner) o, (TValue) v);
++			}
++		}
++	}
+ }

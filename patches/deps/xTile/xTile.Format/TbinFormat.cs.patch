@@ -1,0 +1,55 @@
+diff --git a/xTile.Format/TbinFormat.cs b/xTile.Format/TbinFormat.cs
+index b51cc1a9a693863901f0773a37253bbe240ec1f3..3337dbf522b7fd7c02c78f34ba1c9273ddeb0b0d 100644
+--- a/xTile.Format/TbinFormat.cs
++++ b/xTile.Format/TbinFormat.cs
+@@ -299,7 +299,9 @@ internal class TbinFormat : IMapFormat
+ 	{
+ 		int tileIndex = LoadInt32(stream);
+ 		BlendMode blendMode = (BlendMode)stream.ReadByte();
+-		StaticTile staticTile = new StaticTile(layer, tileSheet, blendMode, tileIndex);
++		// Port: tileSheet always comes from map.GetTileSheet, i.e. it is one of the map's own sheets; the
++		// checked constructor scanned the sheet list for every tile (4-6% of a map load on the Vita).
++		StaticTile staticTile = ((tileSheet != null) ? new StaticTile(layer, tileSheet, blendMode, tileIndex, tileSheetIsInMap: true) : new StaticTile(layer, tileSheet, blendMode, tileIndex));
+ 		LoadProperties(stream, staticTile);
+ 		return staticTile;
+ 	}
+@@ -423,15 +425,27 @@ internal class TbinFormat : IMapFormat
+ 		LoadProperties(stream, layer);
+ 		Location origin = Location.Origin;
+ 		TileSheet tileSheet = null;
++		Tile[,] rawTiles = layer.Tiles.Array;
+ 		while (origin.Y < layerSize.Height)
+ 		{
+ 			origin.X = 0;
++			bool rowTouched = false;
+ 			while (origin.X < layerSize.Width)
+ 			{
+ 				switch ((char)(ushort)stream.ReadByte())
+ 				{
+ 				case 'S':
+-					layer.Tiles[origin] = LoadStaticTile(stream, layer, tileSheet);
++					// Port: tileSheet comes from map.GetTileSheet (already in map.TileSheets), so write the
++					// tile directly and mark the row dirty once per row instead of a Contains scan + hash add per tile.
++					if (tileSheet != null)
++					{
++						rawTiles[origin.X, origin.Y] = LoadStaticTile(stream, layer, tileSheet);
++						rowTouched = true;
++					}
++					else
++					{
++						layer.Tiles[origin] = LoadStaticTile(stream, layer, tileSheet);
++					}
+ 					origin.X++;
+ 					break;
+ 				case 'T':
+@@ -454,6 +468,10 @@ internal class TbinFormat : IMapFormat
+ 					break;
+ 				}
+ 			}
++			if (rowTouched)
++			{
++				layer.MarkRowDirty(origin.Y);
++			}
+ 			origin.Y++;
+ 		}
+ 		map.AddLayer(layer);

@@ -1,0 +1,13 @@
+diff --git a/StardewValley/InteriorDoor.cs b/StardewValley/InteriorDoor.cs
+index 039d76776075ba2310d6c2e49d31003815ea919d..784e3a114cdf2bf9c0788e0a8c781309ba6a3d53 100644
+--- a/StardewValley/InteriorDoor.cs
++++ b/StardewValley/InteriorDoor.cs
+@@ -69,7 +69,7 @@ public class InteriorDoor : NetField<bool, InteriorDoor>
+ 		{
+ 			return;
+ 		}
+-		if (FrameworkExtensions.TryGetValue(Tile.Properties, "Action", out var doorAction) && doorAction.Contains("Door"))
++		if (FrameworkExtensions.TryGetValue(Tile.PropertiesIfAny, "Action", out var doorAction) && doorAction.Contains("Door"))
+ 		{
+ 			string[] actionParts = ArgUtility.SplitBySpace(doorAction, 2);
+ 			if (actionParts.Length > 1)

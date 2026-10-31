@@ -1,0 +1,13 @@
+diff --git a/StardewValley.Internal/ForEachItemHelper.cs b/StardewValley.Internal/ForEachItemHelper.cs
+index 6dadd4c4bfa2cdc7eff312b067b08be0abf0a64b..cc5ffb2d9b0c1cd90a1a9ea54fc0819dd273797c 100644
+--- a/StardewValley.Internal/ForEachItemHelper.cs
++++ b/StardewValley.Internal/ForEachItemHelper.cs
+@@ -288,7 +288,7 @@ public static class ForEachItemHelper
+ 		return true;
+ 		IList<object> GetPath()
+ 		{
+-			return CombinePath(((_003C_003Ec__DisplayClass4_0<TItem>)this).getParentPath, ((_003C_003Ec__DisplayClass4_0<TItem>)this).list);
++			return CombinePath(getParentPath, list);
+ 		}
+ 	}
+ 

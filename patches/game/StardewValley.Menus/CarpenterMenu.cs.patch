@@ -1,0 +1,105 @@
+diff --git a/StardewValley.Menus/CarpenterMenu.cs b/StardewValley.Menus/CarpenterMenu.cs
+index d1184a6b22cfcf5be23bfaa9282d2f3ae8eb4a5b..e91f158054d7182dd0d37256aaacd238510ae401 100644
+--- a/StardewValley.Menus/CarpenterMenu.cs
++++ b/StardewValley.Menus/CarpenterMenu.cs
+@@ -370,6 +370,7 @@ public class CarpenterMenu : IClickableMenu
+ 
+ 	public void SetNewActiveBlueprint(BlueprintEntry blueprint)
+ 	{
++		ReleasePreviewPaint();
+ 		Blueprint = blueprint;
+ 		currentBuilding = Building.CreateInstanceFromId(blueprint.Id, Vector2.Zero);
+ 		currentBuilding.skinId.Value = blueprint.Skin?.Id;
+@@ -389,6 +390,22 @@ public class CarpenterMenu : IClickableMenu
+ 		}
+ 	}
+ 
++	// The preview owns only its generated paint texture; base textures belong to Game1.content.
++	private void ReleasePreviewPaint()
++	{
++		if (currentBuilding?.paintedTexture != null)
++		{
++			currentBuilding.paintedTexture.Dispose();
++			currentBuilding.paintedTexture = null;
++		}
++	}
++
++	protected override void cleanupBeforeExit()
++	{
++		ReleasePreviewPaint();
++		base.cleanupBeforeExit();
++	}
++
+ 	public virtual void UpdateAppearanceButtonVisibility()
+ 	{
+ 		if (appearanceButton != null && currentBuilding != null)
+@@ -867,6 +884,69 @@ public class CarpenterMenu : IClickableMenu
+ 			}
+ 			GameLocation interior = destroyed.GetIndoors();
+ 			Cabin cabin = interior as Cabin;
++			void ContinueDemolish()
++			{
++				if (Action != CarpentryAction.Demolish || destroyed == null || !farm.buildings.Contains(destroyed))
++				{
++					return;
++				}
++				if (destroyed.daysOfConstructionLeft.Value > 0 || destroyed.daysUntilUpgrade.Value > 0)
++				{
++					Game1.addHUDMessage(new HUDMessage(Game1.content.LoadString("Strings\\UI:Carpenter_CantDemolish_DuringConstruction"), 3));
++					return;
++				}
++				if (interior is AnimalHouse animalHouse && animalHouse.animalsThatLiveHere.Count > 0)
++				{
++					Game1.addHUDMessage(new HUDMessage(Game1.content.LoadString("Strings\\UI:Carpenter_CantDemolish_AnimalsHere"), 3));
++					return;
++				}
++				if (interior != null && interior.farmers.Any())
++				{
++					Game1.addHUDMessage(new HUDMessage(Game1.content.LoadString("Strings\\UI:Carpenter_CantDemolish_PlayerHere"), 3));
++					return;
++				}
++				if (cabin != null)
++				{
++					foreach (Farmer allFarmer in Game1.getAllFarmers())
++					{
++						if (allFarmer.currentLocation != null && allFarmer.currentLocation.Name == cabin.GetCellarName())
++						{
++							Game1.addHUDMessage(new HUDMessage(Game1.content.LoadString("Strings\\UI:Carpenter_CantDemolish_PlayerHere"), 3));
++							return;
++						}
++					}
++					if (cabin.IsOwnerActivated)
++					{
++						Game1.addHUDMessage(new HUDMessage(Game1.content.LoadString("Strings\\UI:Carpenter_CantDemolish_FarmhandOnline"), 3));
++						return;
++					}
++				}
++				destroyed.BeforeDemolish();
++				StardewValley.Objects.Chest chest = null;
++				if (cabin != null)
++				{
++					List<Item> list = cabin.demolish();
++					if (list.Count > 0)
++					{
++						chest = new StardewValley.Objects.Chest(playerChest: true);
++						chest.fixLidFrame();
++						chest.Items.OverwriteWith(list);
++					}
++				}
++				if (farm.destroyStructure(destroyed))
++				{
++					Game1.flashAlpha = 1f;
++					destroyed.showDestroyedAnimation(TargetLocation);
++					Game1.playSound("explosion");
++					Utility.spreadAnimalsAround(destroyed, farm);
++					DelayedAction.functionAfterDelay(returnToCarpentryMenu, 1500);
++					freeze = true;
++					if (chest != null)
++					{
++						farm.objects[new Vector2(destroyed.tileX.Value + destroyed.tilesWide.Value / 2, destroyed.tileY.Value + destroyed.tilesHigh.Value / 2)] = chest;
++					}
++				}
++			}
+ 			if (destroyed != null)
+ 			{
+ 				if (cabin != null && !Game1.IsMasterGame)

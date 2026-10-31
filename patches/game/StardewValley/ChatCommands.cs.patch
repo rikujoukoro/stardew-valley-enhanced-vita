@@ -1,0 +1,38 @@
+diff --git a/StardewValley/ChatCommands.cs b/StardewValley/ChatCommands.cs
+index a4bb304c587180eea0b9c7741714efbdc62e09b7..acfb2347da45aabd419c6b025a2e146675dad651 100644
+--- a/StardewValley/ChatCommands.cs
++++ b/StardewValley/ChatCommands.cs
+@@ -454,6 +454,25 @@ public static class ChatCommands
+ 			Game1.bannedUsers.Clear();
+ 		}
+ 
++		public static void ShowIp(string[] command, ChatBox chat)
++		{
++			string ip = VitaPlatform.GetHostIpAddress(forceRefresh: true);
++			if (!string.IsNullOrEmpty(ip))
++			{
++				string msg = VitaPlatform.IsTr
++					? $"[LAN Sunucusu] IP Adresi: {ip} (Port: 24642)"
++					: $"[LAN Server] IP Address: {ip} (Port: 24642)";
++				chat.addMessage(msg, new Color(104, 214, 255));
++			}
++			else
++			{
++				string msg = VitaPlatform.IsTr
++					? "[LAN Sunucusu] Yerel IP alınamadı (Wi-Fi bağlantısını kontrol edin)"
++					: "[LAN Server] Could not get local IP (Check Wi-Fi connection)";
++				chat.addErrorMessage(msg);
++			}
++		}
++
+ 		public static void UnlinkPlayer(string[] command, ChatBox chat)
+ 		{
+ 			int index = 0;
+@@ -491,6 +510,7 @@ public static class ChatCommands
+ 	{
+ 		Handlers = new Dictionary<string, ChatCommand>(StringComparer.OrdinalIgnoreCase);
+ 		Aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
++		Register("ip", DefaultHandlers.ShowIp, (string name) => "Shows LAN host IP address", new string[3] { "hostip", "lanip", "serverip" });
+ 		Register("qi", DefaultHandlers.Qi, null);
+ 		Register("concernedApe", DefaultHandlers.ConcernedApe, null, new string[2] { "ape", "ca" });
+ 		Register("cheat", DefaultHandlers.Cheat, null, new string[5] { "showMeTheMoney", "imACheat", "cheats", "freeGold", "rosebud" });

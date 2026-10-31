@@ -1,0 +1,191 @@
+--- a/src/FNAPlatform/SDL3_FNAPlatform.cs
++++ b/src/FNAPlatform/SDL3_FNAPlatform.cs
+@@ -1822,6 +1822,33 @@
+ 			return state;
+ 		}
+ 
++		/* Vita port: the gamepad read in one call (Tools/Vita/stardew/main.c, vita_port_gamepad_read):
++		 * each SDL_GetGamepadButton/Axis P/Invoke cost more than the read itself.
++		 */
++		private static readonly bool INTERNAL_isVita = SDL.SDL_GetPlatform() == "PlayStation Vita";
++		private static readonly int[] INTERNAL_vitaPad = new int[7];
++
++		[DllImport("VitaPort", CallingConvention = CallingConvention.Cdecl)]
++		private static extern unsafe void vita_port_gamepad_read(IntPtr gamepad, int* state);
++
++		private static bool INTERNAL_PadButton(IntPtr device, SDL.SDL_GamepadButton button)
++		{
++			if (INTERNAL_isVita)
++			{
++				return (INTERNAL_vitaPad[0] & (1 << (int) button)) != 0;
++			}
++			return SDL.SDL_GetGamepadButton(device, button);
++		}
++
++		private static short INTERNAL_PadAxis(IntPtr device, SDL.SDL_GamepadAxis axis)
++		{
++			if (INTERNAL_isVita)
++			{
++				return (short) INTERNAL_vitaPad[1 + (int) axis];
++			}
++			return SDL.SDL_GetGamepadAxis(device, axis);
++		}
++
+ 		private static GamePadState INTERNAL_GetGamePadState(int index, GamePadDeadZone deadZoneMode)
+ 		{
+ 			IntPtr device = INTERNAL_devices[index];
+@@ -1830,64 +1857,77 @@
+ 				return new GamePadState();
+ 			}
+ 
++			// Vita port: one native call fills INTERNAL_vitaPad for the reads below
++			if (INTERNAL_isVita)
++			{
++				// A pointer, not the array: Mono copied an int[] in and out (and freed the copy) each call.
++				unsafe
++				{
++					fixed (int* pad = INTERNAL_vitaPad)
++					{
++						vita_port_gamepad_read(device, pad);
++					}
++				}
++			}
++
+ 			// Sticks
+ 			const float axisDivisor = 32767.0f;
+ 			Vector2 stickLeft = new Vector2(
+-				SDL.SDL_GetGamepadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFTX) / axisDivisor,
+-				SDL.SDL_GetGamepadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFTY) / -axisDivisor
++				INTERNAL_PadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFTX) / axisDivisor,
++				INTERNAL_PadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFTY) / -axisDivisor
+ 			);
+ 			Vector2 stickRight = new Vector2(
+-				SDL.SDL_GetGamepadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHTX) / axisDivisor,
+-				SDL.SDL_GetGamepadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHTY) / -axisDivisor
++				INTERNAL_PadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHTX) / axisDivisor,
++				INTERNAL_PadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHTY) / -axisDivisor
+ 			);
+ 
+ 			// Triggers
+-			float triggerLeft = SDL.SDL_GetGamepadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / axisDivisor;
+-			float triggerRight = SDL.SDL_GetGamepadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / axisDivisor;
++			float triggerLeft = INTERNAL_PadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / axisDivisor;
++			float triggerRight = INTERNAL_PadAxis(device, SDL.SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / axisDivisor;
+ 
+ 			// Buttons
+ 			Buttons gc_buttonState = (Buttons) 0;
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_SOUTH))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_SOUTH))
+ 			{
+ 				gc_buttonState |= Buttons.A;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_EAST))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_EAST))
+ 			{
+ 				gc_buttonState |= Buttons.B;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_WEST))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_WEST))
+ 			{
+ 				gc_buttonState |= Buttons.X;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_NORTH))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_NORTH))
+ 			{
+ 				gc_buttonState |= Buttons.Y;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_BACK))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_BACK))
+ 			{
+ 				gc_buttonState |= Buttons.Back;
+ 			}
+-			if (INTERNAL_capabilities[index].HasBigButton && SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_MISC1))
++			if (INTERNAL_capabilities[index].HasBigButton && INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_MISC1))
+ 			{
+ 				gc_buttonState |= Buttons.BigButton;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_START))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_START))
+ 			{
+ 				gc_buttonState |= Buttons.Start;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_LEFT_STICK))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_LEFT_STICK))
+ 			{
+ 				gc_buttonState |= Buttons.LeftStick;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_RIGHT_STICK))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_RIGHT_STICK))
+ 			{
+ 				gc_buttonState |= Buttons.RightStick;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_LEFT_SHOULDER))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_LEFT_SHOULDER))
+ 			{
+ 				gc_buttonState |= Buttons.LeftShoulder;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER))
+ 			{
+ 				gc_buttonState |= Buttons.RightShoulder;
+ 			}
+@@ -1897,49 +1937,49 @@
+ 			ButtonState dpadDown = ButtonState.Released;
+ 			ButtonState dpadLeft = ButtonState.Released;
+ 			ButtonState dpadRight = ButtonState.Released;
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_UP))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_UP))
+ 			{
+ 				gc_buttonState |= Buttons.DPadUp;
+ 				dpadUp = ButtonState.Pressed;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_DOWN))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_DOWN))
+ 			{
+ 				gc_buttonState |= Buttons.DPadDown;
+ 				dpadDown = ButtonState.Pressed;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_LEFT))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_LEFT))
+ 			{
+ 				gc_buttonState |= Buttons.DPadLeft;
+ 				dpadLeft = ButtonState.Pressed;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_RIGHT))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_RIGHT))
+ 			{
+ 				gc_buttonState |= Buttons.DPadRight;
+ 				dpadRight = ButtonState.Pressed;
+ 			}
+ 
+ 			// Extensions
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_MISC1))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_MISC1))
+ 			{
+ 				gc_buttonState |= Buttons.Misc1EXT;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1))
+ 			{
+ 				gc_buttonState |= Buttons.Paddle1EXT;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_LEFT_PADDLE1))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_LEFT_PADDLE1))
+ 			{
+ 				gc_buttonState |= Buttons.Paddle2EXT;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2))
+ 			{
+ 				gc_buttonState |= Buttons.Paddle3EXT;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_LEFT_PADDLE2))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_LEFT_PADDLE2))
+ 			{
+ 				gc_buttonState |= Buttons.Paddle4EXT;
+ 			}
+-			if (SDL.SDL_GetGamepadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_TOUCHPAD))
++			if (INTERNAL_PadButton(device, SDL.SDL_GamepadButton.SDL_GAMEPAD_BUTTON_TOUCHPAD))
+ 			{
+ 				gc_buttonState |= Buttons.TouchPadEXT;
+ 			}

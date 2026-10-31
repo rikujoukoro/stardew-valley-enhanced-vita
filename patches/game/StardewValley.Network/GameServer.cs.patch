@@ -1,0 +1,73 @@
+diff --git a/StardewValley.Network/GameServer.cs b/StardewValley.Network/GameServer.cs
+index 2e48a86a00b259e64b978bc601576e79b785ef58..e27217417dc3dd4219af4e51e637ccfbc0e4ac25 100644
+--- a/StardewValley.Network/GameServer.cs
++++ b/StardewValley.Network/GameServer.cs
+@@ -2,14 +2,12 @@ using System;
+ using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
+-using Lidgren.Network;
+ using Microsoft.Xna.Framework;
+ using Netcode;
+ using StardewValley.Locations;
+ using StardewValley.Menus;
+ using StardewValley.Minigames;
+ using StardewValley.Network.Dedicated;
+-using StardewValley.SDKs.Steam;
+ using StardewValley.SaveSerialization;
+ 
+ namespace StardewValley.Network;
+@@ -83,10 +81,6 @@ public class GameServer : IGameServer, IBandwidthMonitor
+ 		_isLocalMultiplayerInitiatedServer = local_multiplayer;
+ 		if (!_isLocalMultiplayerInitiatedServer && Program.sdk.Networking != null)
+ 		{
+-			if (Program.sdk.Networking is SteamNetHelper steamNetworking)
+-			{
+-				servers.Add(steamNetworking.CreateSteamServer(this));
+-			}
+ 			Server sdkServer = Program.sdk.Networking.CreateServer(this);
+ 			if (sdkServer != null)
+ 			{
+@@ -129,41 +123,13 @@ public class GameServer : IGameServer, IBandwidthMonitor
+ 			return;
+ 		}
+ 		bool local_only = true;
+-		HashSet<long> local_clients = new HashSet<long>();
+-		GameRunner.instance.ExecuteForInstances((Game1 instance) =>
+-		{
+-			Client client = Game1.client;
+-			if (client == null && Game1.activeClickableMenu is FarmhandMenu farmhandMenu)
+-			{
+-				client = farmhandMenu.client;
+-			}
+-			if (client is LidgrenClient lidgrenClient)
+-			{
+-				local_clients.Add(lidgrenClient.client.UniqueIdentifier);
+-			}
+-		});
+ 		foreach (Server server in servers)
+ 		{
+-			if (server is LidgrenServer lidgren_server)
+-			{
+-				foreach (NetConnection connection in lidgren_server.server.Connections)
+-				{
+-					if (!local_clients.Contains(connection.RemoteUniqueIdentifier))
+-					{
+-						local_only = false;
+-						break;
+-					}
+-				}
+-			}
+-			else if (server.connectionsCount > 0)
++			if (server.connectionsCount > 0)
+ 			{
+ 				local_only = false;
+ 				break;
+ 			}
+-			if (!local_only)
+-			{
+-				break;
+-			}
+ 		}
+ 		if (Game1.hasLocalClientsOnly != local_only)
+ 		{

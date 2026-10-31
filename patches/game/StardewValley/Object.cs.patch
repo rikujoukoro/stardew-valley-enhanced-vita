@@ -1,0 +1,272 @@
+diff --git a/StardewValley/Object.cs b/StardewValley/Object.cs
+index 41e16d6261220a0a8b6395bc0ec5f481681bcbda..d6faa6dcb815c4ef772607c5d10051f4dfa6c8f2 100644
+--- a/StardewValley/Object.cs
++++ b/StardewValley/Object.cs
+@@ -477,6 +477,12 @@ public class Object : Item
+ 
+ 	protected bool _hasLightSource;
+ 
++	/// <summary>Port: the <see cref="P:StardewValley.Item.QualifiedItemId" /> instance <see cref="F:StardewValley.Object._idHasFrameUpdate" /> was computed for. The id is cached and rebuilt as a new string whenever the item id or type changes, so a reference comparison tells whether the flag still applies.</summary>
++	private string _idHasFrameUpdateFor;
++
++	/// <summary>Port: whether <see cref="M:StardewValley.Object.updateWhenCurrentLocation(Microsoft.Xna.Framework.GameTime)" /> has id-specific work for this item (the id switch, or a text sign).</summary>
++	private bool _idHasFrameUpdate;
++
+ 	public static int CurrentParsedItemCount;
+ 
+ 	protected int health = 10;
+@@ -573,6 +579,7 @@ public class Object : Item
+ 		get
+ 		{
+ 			displayName = loadDisplayName();
++			if (VitaTractorMod.IsKit(this)) return VitaTractorMod.KitName;
+ 			if (orderData.Value == "QI_COOKING")
+ 			{
+ 				displayName = Game1.content.LoadString("Strings\\StringsFromCSFiles:Fresh_Prefix", displayName);
+@@ -795,10 +802,19 @@ public class Object : Item
+ 		heldObject.fieldChangeVisibleEvent += (NetRef<Object> field, Object oldValue, Object newValue) =>
+ 		{
+ 			_hasHeldObject = heldObject.Value != null;
++			if (_hasHeldObject)
++			{
++				// Port: a filled machine updates from now on, not from the location's next scan.
++				Location?.QueueFrameUpdate(this);
++			}
+ 		};
+ 		netLightSource.fieldChangeVisibleEvent += (NetRef<LightSource> field, LightSource oldValue, LightSource newValue) =>
+ 		{
+ 			_hasLightSource = netLightSource.Value != null;
++			if (_hasLightSource)
++			{
++				Location?.QueueFrameUpdate(this);
++			}
+ 		};
+ 		bigCraftable.fieldChangeVisibleEvent += (NetBool field, bool oldValue, bool newValue) =>
+ 		{
+@@ -834,7 +850,7 @@ public class Object : Item
+ 		bigCraftable.Value = true;
+ 		if (Game1.bigCraftableData.TryGetValue(itemId, out var data))
+ 		{
+-			name = data.Name ?? ItemRegistry.GetDataOrErrorItem(QualifiedItemId).InternalName;
++			name = data.Name ?? GetParsedData().InternalName;
+ 			price.Value = data.Price;
+ 			type.Value = "Crafting";
+ 			Category = -9;
+@@ -859,7 +875,7 @@ public class Object : Item
+ 		ResetParentSheetIndex();
+ 		if (Game1.objectData.TryGetValue(itemId, out var data))
+ 		{
+-			name = data.Name ?? ItemRegistry.GetDataOrErrorItem(QualifiedItemId).InternalName;
++			name = data.Name ?? GetParsedData().InternalName;
+ 			this.price.Value = data.Price;
+ 			edibility.Value = data.Edibility;
+ 			type.Value = data.Type;
+@@ -1293,7 +1309,7 @@ public class Object : Item
+ 			}
+ 			return false;
+ 		}
+-		if (bigCraftable.Value && !(t is MeleeWeapon) && t.isHeavyHitter() && ItemRegistry.GetDataOrErrorItem(QualifiedItemId).IsErrorItem)
++		if (bigCraftable.Value && !(t is MeleeWeapon) && t.isHeavyHitter() && GetParsedData().IsErrorItem)
+ 		{
+ 			playNearbySoundAll("hammer");
+ 			performRemoveAction();
+@@ -2555,6 +2571,61 @@ public class Object : Item
+ 		return MachineDataUtility.PlayEffects(this, effect, playSounds);
+ 	}
+ 
++	/// <summary>Port: whether <see cref="M:StardewValley.Object.updateWhenCurrentLocation(Microsoft.Xna.Framework.GameTime)" /> does anything for this object's id, cached per id string.</summary>
++	private bool IdHasFrameUpdate()
++	{
++		string qualifiedItemId = QualifiedItemId;
++		if ((object)qualifiedItemId != _idHasFrameUpdateFor)
++		{
++			_idHasFrameUpdate = qualifiedItemId == "(O)590" || qualifiedItemId == "(O)SeedSpot" || qualifiedItemId == "(BC)56" || IsTextSign();
++			_idHasFrameUpdateFor = qualifiedItemId;
++		}
++		return _idHasFrameUpdate;
++	}
++
++	/// <summary>Port: whether <see cref="updateWhenCurrentLocation" /> would change anything for this object now (GameLocation lists only these each tick). Types with their own update count as always busy unless they say otherwise (<see cref="Fence" />).</summary>
++	internal virtual bool NeedsFrameUpdate
++	{
++		get
++		{
++			if (OverridesFrameUpdate(GetType()))
++			{
++				return true;
++			}
++			return BaseNeedsFrameUpdate;
++		}
++	}
++
++	/// <summary>Port: whether this class's own <see cref="updateWhenCurrentLocation" /> has anything to do.</summary>
++	private bool BaseNeedsFrameUpdate
++	{
++		get
++		{
++			if (!_hasHeldObject && !_hasLightSource && _machineAnimation == null && shakeTimer <= 0 && !readyForHarvest.Value)
++			{
++				return IdHasFrameUpdate();
++			}
++			return true;
++		}
++	}
++
++	private static readonly Dictionary<Type, bool> _overridesFrameUpdate = new Dictionary<Type, bool>();
++
++	/// <summary>Port: whether a type replaces <see cref="updateWhenCurrentLocation" />, cached per type.</summary>
++	private static bool OverridesFrameUpdate(Type type)
++	{
++		if (type == typeof(Object))
++		{
++			return false;
++		}
++		if (!_overridesFrameUpdate.TryGetValue(type, out bool overrides))
++		{
++			overrides = type.GetMethod("updateWhenCurrentLocation", new Type[1] { typeof(GameTime) })?.DeclaringType != typeof(Object);
++			_overridesFrameUpdate[type] = overrides;
++		}
++		return overrides;
++	}
++
+ 	public virtual void updateWhenCurrentLocation(GameTime time)
+ 	{
+ 		GameLocation environment = Location;
+@@ -2562,6 +2633,13 @@ public class Object : Item
+ 		{
+ 			return;
+ 		}
++		// Port: most objects (a farm's stones, weeds and twigs) have nothing to do here. Called for
++		// every object of the location each tick, the id comparisons below added up on the Vita;
++		// this returns early in exactly the cases where the rest of the method changes nothing.
++		if (!BaseNeedsFrameUpdate)
++		{
++			return;
++		}
+ 		if (readyForHarvest.Value && !_hasHeldObject)
+ 		{
+ 			readyForHarvest.Value = false;
+@@ -3304,6 +3382,7 @@ public class Object : Item
+ 
+ 	public virtual bool performUseAction(GameLocation location)
+ 	{
++		if (VitaTractorMod.IsKit(this)) return VitaTractorMod.UseKit(this, Game1.player);
+ 		if (!Game1.player.canMove || isTemporarilyInvisible)
+ 		{
+ 			return false;
+@@ -5117,7 +5196,7 @@ public class Object : Item
+ 
+ 	public virtual void drawWhenHeld(SpriteBatch spriteBatch, Vector2 objectPosition, Farmer f)
+ 	{
+-		ParsedItemData itemData = ItemRegistry.GetDataOrErrorItem(QualifiedItemId);
++		ParsedItemData itemData = GetParsedData();
+ 		float drawLayer = Math.Max(0f, (float)(f.StandingPixel.Y + 3) / 10000f);
+ 		Texture2D texture = itemData.GetTexture();
+ 		int offset = 0;
+@@ -5177,13 +5256,18 @@ public class Object : Item
+ 	public override void drawInMenu(SpriteBatch spriteBatch, Vector2 location, float scaleSize, float transparency, float layerDepth, StackDrawType drawStackNumber, Color color, bool drawShadow)
+ 	{
+ 		AdjustMenuDrawForRecipes(ref transparency, ref scaleSize);
+-		if (drawShadow && !bigCraftable.Value && QualifiedItemId != "(O)590" && QualifiedItemId != "(O)SeedSpot")
++		bool isBig = bigCraftable.Value;
++		if (drawShadow && !isBig)
+ 		{
+-			DrawShadow(spriteBatch, location, color, layerDepth);
++			string qid = QualifiedItemId;
++			if (qid != "(O)590" && qid != "(O)SeedSpot")
++			{
++				DrawShadow(spriteBatch, location, color, layerDepth);
++			}
+ 		}
+-		ParsedItemData itemData = ItemRegistry.GetDataOrErrorItem(QualifiedItemId);
++		ParsedItemData itemData = GetParsedData();
+ 		float drawnScale = scaleSize;
+-		if (bigCraftable.Value && drawnScale > 0.2f)
++		if (isBig && drawnScale > 0.2f)
+ 		{
+ 			drawnScale /= 2f;
+ 		}
+@@ -5226,7 +5310,7 @@ public class Object : Item
+ 			{
+ 				indexOffset = 1;
+ 			}
+-			ParsedItemData itemData = ItemRegistry.GetDataOrErrorItem(QualifiedItemId);
++			ParsedItemData itemData = GetParsedData();
+ 			Texture2D texture = itemData.GetTexture();
+ 			Vector2 scaleFactor = getScale();
+ 			scaleFactor *= 4f;
+@@ -5245,7 +5329,7 @@ public class Object : Item
+ 			{
+ 				b.Draw(Game1.shadowTexture, getLocalPosition(Game1.viewport) + new Vector2(32f, 53f), Game1.shadowTexture.Bounds, Color.White, 0f, new Vector2(Game1.shadowTexture.Bounds.Center.X, Game1.shadowTexture.Bounds.Center.Y), 4f, SpriteEffects.None, (float)bounds.Bottom / 15000f);
+ 			}
+-			ParsedItemData itemData2 = ItemRegistry.GetDataOrErrorItem(QualifiedItemId);
++			ParsedItemData itemData2 = GetParsedData();
+ 			b.Draw(itemData2.GetTexture(), Game1.GlobalToLocal(Game1.viewport, new Vector2(x * 64 + 32, y * 64 + 32)), itemData2.GetSourceRect(), Color.White, 0f, new Vector2(8f, 8f), (scale.Y > 1f) ? getScale().Y : 4f, flipped.Value ? SpriteEffects.FlipHorizontally : SpriteEffects.None, (float)bounds.Bottom / 10000f);
+ 		}
+ 	}
+@@ -5282,7 +5366,7 @@ public class Object : Item
+ 			{
+ 				offset = 1;
+ 			}
+-			ParsedItemData itemData = ItemRegistry.GetDataOrErrorItem(QualifiedItemId);
++			ParsedItemData itemData = GetParsedData();
+ 			if (heldObject.Value != null)
+ 			{
+ 				MachineData machineData = GetMachineData();
+@@ -5350,7 +5434,7 @@ public class Object : Item
+ 			{
+ 				spriteBatch.Draw(Game1.shadowTexture, Game1.GlobalToLocal(Game1.viewport, new Vector2(x * 64 + 32, y * 64 + 51 + 4)), Game1.shadowTexture.Bounds, Color.White * alpha, 0f, new Vector2(Game1.shadowTexture.Bounds.Center.X, Game1.shadowTexture.Bounds.Center.Y), 4f, SpriteEffects.None, (float)bounds.Bottom / 15000f);
+ 			}
+-			ParsedItemData itemData2 = ItemRegistry.GetDataOrErrorItem(QualifiedItemId);
++			ParsedItemData itemData2 = GetParsedData();
+ 			spriteBatch.Draw(itemData2.GetTexture(), Game1.GlobalToLocal(Game1.viewport, new Vector2(x * 64 + 32 + ((shakeTimer > 0) ? Game1.random.Next(-1, 2) : 0), y * 64 + 32 + ((shakeTimer > 0) ? Game1.random.Next(-1, 2) : 0))), itemData2.GetSourceRect(), Color.White * alpha, 0f, new Vector2(8f, 8f), (scale.Y > 1f) ? getScale().Y : 4f, flipped.Value ? SpriteEffects.FlipHorizontally : SpriteEffects.None, (float)(isPassable() ? bounds.Top : bounds.Center.Y) / 10000f);
+ 			if (IsSprinkler())
+ 			{
+@@ -5427,7 +5511,7 @@ public class Object : Item
+ 			{
+ 				indexOffset = 1;
+ 			}
+-			ParsedItemData itemData = ItemRegistry.GetDataOrErrorItem(QualifiedItemId);
++			ParsedItemData itemData = GetParsedData();
+ 			spriteBatch.Draw(itemData.GetTexture(), destination, itemData.GetSourceRect(indexOffset, ParentSheetIndex), Color.White * alpha, 0f, Vector2.Zero, SpriteEffects.None, layerDepth);
+ 			if (QualifiedItemId == "(BC)17" && MinutesUntilReady > 0)
+ 			{
+@@ -5444,7 +5528,7 @@ public class Object : Item
+ 			{
+ 				spriteBatch.Draw(Game1.shadowTexture, Game1.GlobalToLocal(Game1.viewport, new Vector2(xNonTile + 32, yNonTile + 51 + 4)), Game1.shadowTexture.Bounds, Color.White * alpha, 0f, new Vector2(Game1.shadowTexture.Bounds.Center.X, Game1.shadowTexture.Bounds.Center.Y), 4f, SpriteEffects.None, layerDepth - 1E-06f);
+ 			}
+-			ParsedItemData itemData2 = ItemRegistry.GetDataOrErrorItem(QualifiedItemId);
++			ParsedItemData itemData2 = GetParsedData();
+ 			spriteBatch.Draw(itemData2.GetTexture(), Game1.GlobalToLocal(Game1.viewport, new Vector2(xNonTile + 32 + ((shakeTimer > 0) ? Game1.random.Next(-1, 2) : 0), yNonTile + 32 + ((shakeTimer > 0) ? Game1.random.Next(-1, 2) : 0))), itemData2.GetSourceRect(0, ParentSheetIndex), Color.White * alpha, 0f, new Vector2(8f, 8f), (scale.Y > 1f) ? getScale().Y : 4f, flipped.Value ? SpriteEffects.FlipHorizontally : SpriteEffects.None, layerDepth);
+ 		}
+ 	}
+@@ -5894,7 +5978,11 @@ public class Object : Item
+ 
+ 	public virtual bool IsTapper()
+ 	{
+-		return HasContextTag("tapper_item");
++		if (_isTapperCache < 0)
++		{
++			_isTapperCache = (sbyte)(HasContextTag("tapper_item") ? 1 : 0);
++		}
++		return _isTapperCache != 0;
+ 	}
+ 
+ 	public virtual bool IsBar()
+@@ -6795,6 +6883,7 @@ public class Object : Item
+ 
+ 	public override string getDescription()
+ 	{
++		if (VitaTractorMod.IsKit(this)) return VitaTractorMod.KitDescription;
+ 		if (Category == -102 && Game1.player.stats.Get(itemId.Value) != 0 && ItemId != "Book_PriceCatalogue" && ItemId != "Book_AnimalCatalogue")
+ 		{
+ 			foreach (string tag in GetContextTags())
+@@ -6819,7 +6908,7 @@ public class Object : Item
+ 		{
+ 			return Game1.parseText(Game1.content.LoadString("Strings\\StringsFromCSFiles:Object.cs.13078"), Game1.smallFont, getDescriptionWidth());
+ 		}
+-		string text = ItemRegistry.GetDataOrErrorItem(QualifiedItemId).Description;
++		string text = GetParsedData().Description;
+ 		string preservedId = GetPreservedItemId();
+ 		if (preservedId != null)
+ 		{

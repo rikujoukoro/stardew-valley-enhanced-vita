@@ -1,0 +1,104 @@
+diff --git a/StardewValley/KeyboardDispatcher.cs b/StardewValley/KeyboardDispatcher.cs
+index b7a7507958d2cc39cdba7d04fb82e29758668804..3127a7aa63c8310a3ac610c6cc6fb618044f795b 100644
+--- a/StardewValley/KeyboardDispatcher.cs
++++ b/StardewValley/KeyboardDispatcher.cs
+@@ -1,10 +1,7 @@
+ using System;
+ using System.Collections.Generic;
+-using System.Threading;
+-using System.Windows;
+ using Microsoft.Xna.Framework;
+ using Microsoft.Xna.Framework.Input;
+-using StardewValley.NativeClipboard;
+ 
+ namespace StardewValley;
+ 
+@@ -24,7 +21,6 @@ public class KeyboardDispatcher
+ 
+ 	private IKeyboardSubscriber _subscriber;
+ 
+-	private string _pasteResult = "";
+ 
+ 	public IKeyboardSubscriber Subscriber
+ 	{
+@@ -45,6 +41,12 @@ public class KeyboardDispatcher
+ 				{
+ 					_subscriber.Selected = true;
+ 				}
++				// Port: on the Vita, text input is the system keyboard, which a text box opens on
++				// Cross (TextBox.Update) rather than whenever the cursor passes over it.
++				if (!VitaPlatform.IsVita || _subscriber == null)
++				{
++					KeyboardInput.SetTextInputActive(_subscriber != null);
++				}
+ 			}
+ 		}
+ 	}
+@@ -105,11 +107,10 @@ public class KeyboardDispatcher
+ 		{
+ 			if (e.Character == '\u0016')
+ 			{
+-				Thread thread = new Thread(PasteThread);
+-				thread.SetApartmentState(ApartmentState.STA);
+-				thread.Start();
+-				thread.Join();
+-				_enteredText = _pasteResult;
++				// Ctrl+V: FNA reports it as this control character on every platform.
++				string pasted_text = null;
++				DesktopClipboard.GetText(ref pasted_text);
++				_enteredText = pasted_text;
+ 			}
+ 			else
+ 			{
+@@ -138,20 +139,11 @@ public class KeyboardDispatcher
+ 	public void Poll()
+ 	{
+ 		KeyboardState keyboard_state = Game1.input.GetKeyboardState();
+-		bool modifier_held = ((SdlClipboard.Platform != ClipboardPlatformType.OSX) ? (keyboard_state.IsKeyDown(Keys.LeftControl) || keyboard_state.IsKeyDown(Keys.RightControl)) : (keyboard_state.IsKeyDown(Keys.LeftWindows) || keyboard_state.IsKeyDown(Keys.RightWindows)));
+-		if (SdlClipboard.Platform == ClipboardPlatformType.Windows)
+-		{
+-			modifier_held = false;
+-		}
+-		if ((keyboard_state.IsKeyDown(Keys.V) && !_oldKeyboardState.IsKeyDown(Keys.V)) & modifier_held)
+-		{
+-			string pasted_text = null;
+-			DesktopClipboard.GetText(ref pasted_text);
+-			if (pasted_text != null)
+-			{
+-				_enteredText = pasted_text;
+-			}
+-		}
++		// Port: key-down events come from keyboard state changes instead of WM_KEYDOWN.
++		KeyboardInput.Update(keyboard_state);
++		// Port: the XNA build also polled Ctrl/Cmd+V here on Linux and macOS, where WM_CHAR wasn't
++		// available. FNA sends Ctrl+V as '\u0016' text input everywhere (see EventInput_CharEntered),
++		// so polling it too would paste twice.
+ 		_oldKeyboardState = keyboard_state;
+ 		if (_enteredText != null)
+ 		{
+@@ -191,6 +183,7 @@ public class KeyboardDispatcher
+ 			}
+ 			_commandInputs.Clear();
+ 		}
++		KeyboardInput.ReleaseClosedScreenKeyboard();
+ 		if (_keysDown.Count <= 0)
+ 		{
+ 			return;
+@@ -208,17 +201,4 @@ public class KeyboardDispatcher
+ 		}
+ 		_keysDown.Clear();
+ 	}
+-
+-	[STAThread]
+-	private void PasteThread()
+-	{
+-		if (Clipboard.ContainsText())
+-		{
+-			_pasteResult = Clipboard.GetText();
+-		}
+-		else
+-		{
+-			_pasteResult = "";
+-		}
+-	}
+ }

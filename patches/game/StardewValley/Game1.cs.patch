@@ -1,0 +1,2904 @@
+diff --git a/StardewValley/Game1.cs b/StardewValley/Game1.cs
+index 6b17fd4ed6fe3ed7579689ed28c0be53cbded531..a4ffee335c943bb7bacecd97c9a89adc669d6f4d 100644
+--- a/StardewValley/Game1.cs
++++ b/StardewValley/Game1.cs
+@@ -1,8 +1,6 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Diagnostics;
+-using System.Drawing;
+-using System.Drawing.Imaging;
+ using System.Globalization;
+ using System.IO;
+ using System.Linq;
+@@ -12,7 +10,6 @@ using System.Text;
+ using System.Text.RegularExpressions;
+ using System.Threading;
+ using System.Threading.Tasks;
+-using System.Windows.Forms;
+ using Microsoft.Xna.Framework;
+ using Microsoft.Xna.Framework.Audio;
+ using Microsoft.Xna.Framework.Content;
+@@ -59,7 +56,6 @@ using StardewValley.Objects;
+ using StardewValley.Pathfinding;
+ using StardewValley.Projectiles;
+ using StardewValley.Quests;
+-using StardewValley.SDKs.Steam;
+ using StardewValley.SaveMigrations;
+ using StardewValley.SaveSerialization;
+ using StardewValley.SpecialOrders;
+@@ -610,6 +606,7 @@ public class Game1 : InstanceGame
+ 	public static BundleType bundleType;
+ 
+ 	public static bool isRaining;
++	public static bool IsLoadingSavedGame;
+ 
+ 	public static bool isSnowing;
+ 
+@@ -627,7 +624,7 @@ public class Game1 : InstanceGame
+ 
+ 	public static string weatherForTomorrow;
+ 
+-	public float zoomModifier = 1f;
++	public float zoomModifier = VitaPlatform.IsVita ? VitaPlatform.ZoomModifier : 1f;
+ 
+ 	private static ScreenFade screenFade;
+ 
+@@ -837,6 +834,12 @@ public class Game1 : InstanceGame
+ 
+ 	public static RainDrop[] rainDrops;
+ 
++	// Vita port: the eight weather frames are immutable for a given texture width.
++	// 128 bytes shared across frames, rather than texture-size/division work per drop.
++	private static readonly Microsoft.Xna.Framework.Rectangle[] _vitaRainSources = new Microsoft.Xna.Framework.Rectangle[8];
++
++	private static int _vitaRainSourceWidth = -1;
++
+ 	public static ICue chargeUpSound;
+ 
+ 	public static ICue wind;
+@@ -1224,6 +1227,11 @@ public class Game1 : InstanceGame
+ 		{
+ 			if (game1.instanceGameLocation != value)
+ 			{
++				if (value != null)
++				{
++					// Port: the late parts of a ten-minute update (Vita) see the location the player had when the clock ticked.
++					VitaRunTenMinuteQueue(double.MaxValue);
++				}
+ 				if (_PreviousNonNullLocation == null)
+ 				{
+ 					_PreviousNonNullLocation = game1.instanceGameLocation;
+@@ -1796,16 +1804,9 @@ public class Game1 : InstanceGame
+ 	{
+ 		get
+ 		{
+-			if (graphics.IsFullScreen)
+-			{
+-				return true;
+-			}
+-			Form form = Control.FromHandle(Program.gamePtr.Window.Handle).FindForm();
+-			if (form.WindowState == FormWindowState.Maximized)
+-			{
+-				return form.FormBorderStyle == FormBorderStyle.None;
+-			}
+-			return false;
++			// FNA: fullscreen is SDL's borderless "fullscreen desktop" mode, which covers the
++			// maximized borderless WinForms window the XNA build used for windowed borderless.
++			return graphics.IsFullScreen;
+ 		}
+ 	}
+ 
+@@ -1960,6 +1961,32 @@ public class Game1 : InstanceGame
+ 		return _currentSaveName;
+ 	}
+ 
++	// Port: Vita world buffer sizes (e.g. 1463x829 at 88%) made the bilinear downscale to 960x544 sample
++	// at drifting sub-texel phases, so tile seams showed as 1px lines. Multiples of 32 keep the 21/32
++	// ratio phase-aligned to 64px tiles. Zero cost: only the buffer is up to 31px larger (clipped).
++	private static int VitaAlignBuffer(int v)
++	{
++		return VitaPlatform.IsVita ? (v + 31) / 32 * 32 : v;
++	}
++
++	/// <summary>Port: <see cref="P:StardewValley.Game1.screen" /> for the current zoom, sized as the window size change sizes it. None at a direct zoom (<see cref="VitaDirectWorldScale" />) unless <paramref name="force" />: Draw then makes it once the camera leaves those zooms.</summary>
++	private void VitaAllocateScreen(bool force)
++	{
++		if (!force && VitaDirectWorldScale() > 0f)
++		{
++			screen = null;
++			return;
++		}
++		int width = localMultiplayerWindow.Width > 0 ? localMultiplayerWindow.Width : graphics.GraphicsDevice.PresentationParameters.BackBufferWidth;
++		int height = localMultiplayerWindow.Height > 0 ? localMultiplayerWindow.Height : graphics.GraphicsDevice.PresentationParameters.BackBufferHeight;
++		int sw = Math.Min(GameRunner.MaxTextureSize, VitaAlignBuffer((int)Math.Ceiling((float)width * (1f / options.zoomLevel))));
++		int sh = Math.Min(GameRunner.MaxTextureSize, VitaAlignBuffer((int)Math.Ceiling((float)height * (1f / options.zoomLevel))));
++		screen = new RenderTarget2D(graphics.GraphicsDevice, sw, sh, mipMap: false, SurfaceFormat.Color, DepthFormat.None, 0, RenderTargetUsage.PreserveContents)
++		{
++			Name = "@Game1.screen"
++		};
++	}
++
+ 	private static void allocateLightmap(int width, int height)
+ 	{
+ 		int quality = 8;
+@@ -2010,6 +2037,7 @@ public class Game1 : InstanceGame
+ 
+ 	static Game1()
+ 	{
++		VitaPlatform.Trace("Game1 static constructor: start");
+ 		realMilliSecondsPerGameMinute = 700;
+ 		realMilliSecondsPerGameTenMinutes = realMilliSecondsPerGameMinute * 10;
+ 		cursor_none = -1;
+@@ -2040,7 +2068,9 @@ public class Game1 : InstanceGame
+ 		_debugStringBuilder = new StringBuilder();
+ 		debugTimings = new DebugTimings();
+ 		_locationLookup = new Dictionary<string, GameLocation>(StringComparer.OrdinalIgnoreCase);
++		VitaPlatform.Trace("Game1 static constructor: building the Asian spacing regex");
+ 		asianSpacingRegex = new Regex(asianSpacingRegexString, RegexOptions.ECMAScript);
++		VitaPlatform.Trace("Game1 static constructor: regex built");
+ 		warpingForForcedRemoteEvent = false;
+ 		_PreviousNonNullLocation = null;
+ 		npcDialogues = new Dictionary<string, Stack<Dialogue>>();
+@@ -2120,7 +2150,10 @@ public class Game1 : InstanceGame
+ 		debrisWeather = new List<WeatherDebris>();
+ 		screenOverlayTempSprites = new TemporaryAnimatedSpriteList();
+ 		uiOverlayTempSprites = new TemporaryAnimatedSpriteList();
+-		log = new DefaultLogger(!Program.releaseBuild, shouldWriteToLogFile: false);
++		VitaPlatform.Trace("Game1 static constructor: creating the logger");
++		// Port development aid: with SV_DEVCHEATS=1 (or SV_LOGFILE=1, set by the Vita launcher) the game
++		// log (e.g. /debug logSounds) also goes to ErrorLogs/game-latest.txt.
++		log = new DefaultLogger(!Program.releaseBuild, shouldWriteToLogFile: Program.enableCheats || Program.logToFile);
+ 		hash = new HashUtility();
+ 		multiplayer = new Multiplayer();
+ 		uniqueIDForThisGame = Utility.NewUniqueIdForThisGame();
+@@ -2173,6 +2206,7 @@ public class Game1 : InstanceGame
+ 		_ParseTextStringBuilder = new StringBuilder(2408);
+ 		_ParseTextStringBuilderLine = new StringBuilder(1024);
+ 		_ParseTextStringBuilderWord = new StringBuilder(256);
++		VitaPlatform.Trace("Game1 static constructor: reading the version");
+ 		GameAssemblyName = typeof(Game1).Assembly.GetName().Name;
+ 		AssemblyInformationalVersionAttribute attribute = typeof(Game1).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+ 		if (!string.IsNullOrWhiteSpace(attribute?.InformationalVersion))
+@@ -2226,6 +2260,10 @@ public class Game1 : InstanceGame
+ 	{
+ 		LocalizedContentManager.localizedAssetNames.Clear();
+ 		BaseEnchantment.ResetEnchantments();
++		if (VitaPlatform.IsVita)
++		{
++			VitaReleaseLanguageAssets();
++		}
+ 		samBandName = content.LoadString("Strings\\StringsFromCSFiles:Game1.cs.2156");
+ 		elliottBookName = content.LoadString("Strings\\StringsFromCSFiles:Game1.cs.2157");
+ 		objectSpriteSheet = content.Load<Texture2D>("Maps\\springobjects");
+@@ -2259,6 +2297,22 @@ public class Game1 : InstanceGame
+ 		mouseCursors_1_6 = content.Load<Texture2D>("LooseSprites\\Cursors_1_6");
+ 		giftboxTexture = content.Load<Texture2D>("LooseSprites\\Giftbox");
+ 		controllerMaps = content.Load<Texture2D>("LooseSprites\\ControllerMaps");
++		Utility.VitaPatchControllerMaps(controllerMaps);
++		if (dayTimeMoneyBox != null)
++		{
++			if (dayTimeMoneyBox.questButton != null)
++			{
++				dayTimeMoneyBox.questButton.texture = mouseCursors;
++			}
++			if (dayTimeMoneyBox.zoomOutButton != null)
++			{
++				dayTimeMoneyBox.zoomOutButton.texture = mouseCursors;
++			}
++			if (dayTimeMoneyBox.zoomInButton != null)
++			{
++				dayTimeMoneyBox.zoomInButton.texture = mouseCursors;
++			}
++		}
+ 		NPCGiftTastes = DataLoader.NpcGiftTastes(content);
+ 		_shortDayDisplayName[0] = content.LoadString("Strings\\StringsFromCSFiles:Game1.cs.3042");
+ 		_shortDayDisplayName[1] = content.LoadString("Strings\\StringsFromCSFiles:Game1.cs.3043");
+@@ -2267,10 +2321,172 @@ public class Game1 : InstanceGame
+ 		_shortDayDisplayName[4] = content.LoadString("Strings\\StringsFromCSFiles:Game1.cs.3046");
+ 		_shortDayDisplayName[5] = content.LoadString("Strings\\StringsFromCSFiles:Game1.cs.3047");
+ 		_shortDayDisplayName[6] = content.LoadString("Strings\\StringsFromCSFiles:Game1.cs.3048");
++		if (VitaPlatform.IsVita)
++		{
++			GC.Collect();
++			VitaPlatform.Trace($"language {LocalizedContentManager.CurrentLanguageString}: {_vitaLanguageDropped} assets of other languages dropped first; vitaGL free {_vitaLanguageFreeKB} KB then, {VitaPlatform.GraphicsFreeKB()} KB now");
++		}
++	}
++
++	private static int _vitaLanguageDropped;
++
++	private static int _vitaLanguageFreeKB;
++
++	/// <summary>Port: whether L, R and right were all held last tick, for <see cref="VitaCameraShortcut" />.</summary>
++	private static bool _vitaCameraComboWasDown;
++
++	/// <summary>Port: whether L, R and left were all held last tick, for <see cref="VitaCameraShortcut" />.</summary>
++	private static bool _vitaFpsComboWasDown;
++
++	/// <summary>Port: the message the last shortcut showed, replaced by the next one rather than stacked under it.</summary>
++	private static HUDMessage _vitaShortcutMessage;
++	private static bool _vitaTractorComboWasDown;
++	private static bool _vitaChestComboWasDown;
++
++	/// <summary>Toolbar slot when the first of L/R went down; -1 while neither is held.</summary>
++	private static int _vitaShoulderToolIndex = -1;
++
++	/// <summary>L and R were held together since the first went down: the selection stays put until both are released.</summary>
++	private static bool _vitaShoulderCombo;
++
++	/// <summary>Toolbar slot on the last frame with neither L nor R held (the switch of the first press runs before this check).</summary>
++	private static int _vitaIdleToolIndex = -1;
++
++	/// <summary>Port: L + R + right switches the camera between Far and Close in play, L + R + left the frame rate cap
++	/// (30, 60, Auto); each shows what it switched to for a moment.</summary>
++	/// <remarks>Read here, every tick of play, from the pad state as the game sees it (L and R arrive as the triggers in play,
++	/// InputState.MapVitaButtons): inside UpdateControlInput it sat behind branches that skip it on some ticks.</remarks>
++	private static void VitaCameraShortcut()
++	{
++		if (!VitaPlatform.IsVita)
++		{
++			return;
++		}
++		VitaPassableCrops.Load();
++		GamePadState pad = input.GetGamePadState();
++		bool shoulders = (pad.IsButtonDown(Buttons.LeftShoulder) || pad.Triggers.Left > 0.5f) && (pad.IsButtonDown(Buttons.RightShoulder) || pad.Triggers.Right > 0.5f);
++		// The four in any order: each switches once when the last of its buttons goes down.
++		bool cameraDown = shoulders && pad.IsButtonDown(Buttons.DPadRight);
++		bool fpsDown = shoulders && pad.IsButtonDown(Buttons.DPadLeft);
++		bool tractorDown = shoulders && pad.IsButtonDown(Buttons.DPadDown);
++		bool chestDown = shoulders && pad.IsButtonDown(Buttons.DPadUp);
++		bool cameraPressed = cameraDown && !_vitaCameraComboWasDown;
++		bool fpsPressed = fpsDown && !_vitaFpsComboWasDown;
++		bool tractorPressed = tractorDown && !_vitaTractorComboWasDown;
++		bool chestPressed = chestDown && !_vitaChestComboWasDown;
++		_vitaCameraComboWasDown = cameraDown;
++		_vitaFpsComboWasDown = fpsDown;
++		_vitaTractorComboWasDown = tractorDown;
++		_vitaChestComboWasDown = chestDown;
++		// In play L/R alone switch the item (triggers, InputState.MapVitaButtons). Pressing both for a shortcut would switch it
++		// by the first of them: remember the slot from the first press and hold it there until both are released.
++		bool leftDown = pad.IsButtonDown(Buttons.LeftShoulder) || pad.Triggers.Left > 0.5f;
++		bool rightDown = pad.IsButtonDown(Buttons.RightShoulder) || pad.Triggers.Right > 0.5f;
++		if (!leftDown && !rightDown)
++		{
++			_vitaShoulderToolIndex = -1;
++			_vitaShoulderCombo = false;
++			if (player != null && activeClickableMenu == null)
++			{
++				_vitaIdleToolIndex = player.CurrentToolIndex;
++			}
++		}
++		else if (player != null && activeClickableMenu == null)
++		{
++			if (_vitaShoulderToolIndex < 0)
++			{
++				// UpdateControlInput already switched the item for this press: take the slot from before it.
++				_vitaShoulderToolIndex = (_vitaIdleToolIndex >= 0) ? _vitaIdleToolIndex : player.CurrentToolIndex;
++			}
++			_vitaShoulderCombo |= shoulders;
++			if (_vitaShoulderCombo && player.CurrentToolIndex != _vitaShoulderToolIndex && _vitaShoulderToolIndex < player.Items.Count)
++			{
++				player.CurrentToolIndex = _vitaShoulderToolIndex;
++			}
++		}
++		if (chestPressed && VitaChestMod.Enabled)
++		{
++			// Only into the chest being looked at (its menu open); never from the field.
++			VitaChestMod.StackIntoOpenChest(player);
++			return;
++		}
++		if (activeClickableMenu != null)
++		{
++			return;
++		}
++		if (tractorPressed)
++		{
++			VitaTractorMod.ToggleTractorHotkey(player);
++		}
++		else if (cameraPressed)
++		{
++			Options.VitaSetCameraZoom((VitaPlatform.CameraZoom == 0) ? 1 : 0);
++			playSound("shwip");
++			VitaShowShortcutMessage((VitaPlatform.IsTr ? "Kamera: " : "Camera: ") + VitaPlatform.CameraZoomLabels[VitaPlatform.CameraZoom]);
++			VitaPlatform.Trace("camera shortcut: L + R + right");
++		}
++		else if (fpsPressed)
++		{
++			VitaPlatform.FpsLimitIndex = (VitaPlatform.FpsLimitIndex + 1) % VitaPlatform.FpsLimitLabels.Count;
++			playSound("shwip");
++			string label = (VitaPlatform.FpsLimit == 0) ? (VitaPlatform.IsTr ? "Otomatik" : "Auto") : VitaPlatform.FpsLimit.ToString();
++			VitaShowShortcutMessage((VitaPlatform.IsTr ? "FPS sınırı: " : "FPS limit: ") + label);
++			VitaPlatform.Trace("fps shortcut: L + R + left, cap " + label);
++		}
++	}
++
++	/// <summary>Port: a short message without an icon in the HUD's message corner, 1.8 s, replacing the previous shortcut's.</summary>
++	internal static void VitaShowShortcutMessage(string text)
++	{
++		// Keep mod/shortcut notices inside the screen, including longer translations.
++		text = parseText(text, dialogueFont, Math.Max(64, Math.Min(560, uiViewport.Width - 96)));
++		if (_vitaShortcutMessage != null)
++		{
++			hudMessages.Remove(_vitaShortcutMessage);
++		}
++		_vitaShortcutMessage = new HUDMessage(text, 1800f)
++		{
++			noIcon = true
++		};
++		addHUDMessage(_vitaShortcutMessage);
++	}
++
++	/// <summary>Port: before a language change reloads the fonts and sheets, lets the previous language's copies go.</summary>
++	/// <remarks>
++	/// Each language loads its own copies under their own names (LooseSprites/Cursors.tr-TR is 16 MB), and the caches kept
++	/// them all: language changes on the title screen filled vitaGL's GPU memory, and one after a long session ran out of
++	/// memory reading Cursors. The other languages' copies leave the caches first (LocalizedContentManager.VitaForgetOtherLanguages,
++	/// not disposed: a menu may still draw with one), Game1's own references to what is about to be reloaded are dropped, and a
++	/// full collection frees what nothing else uses before the new copies are read; their finalizers queue the GPU frees.
++	/// </remarks>
++	private void VitaReleaseLanguageAssets()
++	{
++		_vitaLanguageFreeKB = VitaPlatform.GraphicsFreeKB();
++		SpriteText.VitaReleaseFontData();
++		objectSpriteSheet = null;
++		objectSpriteSheet_2 = null;
++		bobbersTexture = null;
++		dialogueFont = null;
++		smallFont = null;
++		tinyFont = null;
++		mouseCursors = null;
++		mouseCursors2 = null;
++		mouseCursors_1_6 = null;
++		giftboxTexture = null;
++		controllerMaps = null;
++		_vitaLanguageDropped = LocalizedContentManager.VitaForgetOtherLanguages(dispose: true);
++		GC.Collect();
++		GC.WaitForPendingFinalizers();
++		GC.Collect();
+ 	}
+ 
+ 	public void exitEvent(object sender, EventArgs e)
+ 	{
++		// Port: keep option changes (e.g. volume) made since the last save when the window is closed.
++		if (options != null && options.optionsDirty)
++		{
++			options.SaveDefaultOptions();
++		}
+ 		multiplayer.Disconnect(Multiplayer.DisconnectType.ClosedGame);
+ 		keyboardDispatcher.Cleanup();
+ 	}
+@@ -2325,9 +2541,13 @@ public class Game1 : InstanceGame
+ 			w = graphics.PreferredBackBufferWidth;
+ 			h = graphics.PreferredBackBufferHeight;
+ 		}
+-		if (IsMainInstance && graphics.SynchronizeWithVerticalRetrace != options.vsyncEnabled)
++		// Port: always on for the Vita. The setting is saved with each farm and in default_options, and PC or mobile saves
++		// (and default_options written from them) can hold false: no vsync tears the picture, ignores the 30 fps cap
++		// (VitaPlatform.SetVsyncInterval) and drops more frames. The Vita has no option for it.
++		bool vsync = options.vsyncEnabled || VitaPlatform.IsVita;
++		if (IsMainInstance && graphics.SynchronizeWithVerticalRetrace != vsync)
+ 		{
+-			graphics.SynchronizeWithVerticalRetrace = options.vsyncEnabled;
++			graphics.SynchronizeWithVerticalRetrace = vsync;
+ 			log.Verbose("Vsync toggled: " + graphics.SynchronizeWithVerticalRetrace);
+ 		}
+ 		graphics.ApplyChanges();
+@@ -2374,7 +2594,7 @@ public class Game1 : InstanceGame
+ 		}
+ 		if (GameRunner.instance.gameInstances.Count <= 1)
+ 		{
+-			zoomModifier = 1f;
++			zoomModifier = VitaPlatform.IsVita ? VitaPlatform.ZoomModifier : 1f;
+ 		}
+ 		else
+ 		{
+@@ -2392,22 +2612,20 @@ public class Game1 : InstanceGame
+ 		localMultiplayerWindow.Height = (int)Math.Ceiling((float)h * current_screen_split.W);
+ 		try
+ 		{
+-			int sw = (int)Math.Ceiling((float)localMultiplayerWindow.Width * (1f / options.zoomLevel));
+-			int sh = (int)Math.Ceiling((float)localMultiplayerWindow.Height * (1f / options.zoomLevel));
+-			sw = Math.Min(GameRunner.MaxTextureSize, sw);
+-			sh = Math.Min(GameRunner.MaxTextureSize, sh);
+-			screen = new RenderTarget2D(graphics.GraphicsDevice, sw, sh, mipMap: false, SurfaceFormat.Color, DepthFormat.None, 0, RenderTargetUsage.PreserveContents)
+-			{
+-				Name = "@Game1.screen"
+-			};
++			// Port: none at the zooms the world is drawn straight to the screen at.
++			VitaAllocateScreen(false);
+ 			int uw = (int)Math.Ceiling((float)localMultiplayerWindow.Width / options.uiScale);
+ 			int uh = (int)Math.Ceiling((float)localMultiplayerWindow.Height / options.uiScale);
+ 			uw = Math.Min(GameRunner.MaxTextureSize, uw);
+ 			uh = Math.Min(GameRunner.MaxTextureSize, uh);
+-			uiScreen = new RenderTarget2D(graphics.GraphicsDevice, uw, uh, mipMap: false, SurfaceFormat.Color, DepthFormat.None, 0, RenderTargetUsage.PreserveContents)
++			// Port: kept when its size stays (every camera change came here); a new one could land in slow main RAM on the Vita.
++			if (!VitaPlatform.IsVita || uiScreen == null || uiScreen.IsDisposed || uiScreen.Width != uw || uiScreen.Height != uh)
+ 			{
+-				Name = "@Game1.uiScreen"
+-			};
++				uiScreen = new RenderTarget2D(graphics.GraphicsDevice, uw, uh, mipMap: false, SurfaceFormat.Color, DepthFormat.None, 0, RenderTargetUsage.PreserveContents)
++				{
++					Name = "@Game1.uiScreen"
++				};
++			}
+ 		}
+ 		catch (Exception)
+ 		{
+@@ -2481,6 +2699,7 @@ public class Game1 : InstanceGame
+ 		if (game1.instanceIndex <= 0)
+ 		{
+ 			TitleMenu titleMenu = (TitleMenu)(activeClickableMenu = new TitleMenu());
++			VitaPlatform.StartBackgroundPreJit();
+ 			if (skip)
+ 			{
+ 				titleMenu.skipToTitleButtons();
+@@ -2593,8 +2812,8 @@ public class Game1 : InstanceGame
+ 		DoThreadedInitTask(InitializeSounds);
+ 		int width = graphics.GraphicsDevice.Viewport.Width;
+ 		int height = graphics.GraphicsDevice.Viewport.Height;
+-		width = Math.Min(GameRunner.MaxTextureSize, (int)Math.Ceiling((float)width * (1f / options.zoomLevel)));
+-		height = Math.Min(GameRunner.MaxTextureSize, (int)Math.Ceiling((float)height * (1f / options.zoomLevel)));
++		width = Math.Min(GameRunner.MaxTextureSize, VitaAlignBuffer((int)Math.Ceiling((float)width * (1f / options.zoomLevel))));
++		height = Math.Min(GameRunner.MaxTextureSize, VitaAlignBuffer((int)Math.Ceiling((float)height * (1f / options.zoomLevel))));
+ 		screen = new RenderTarget2D(graphics.GraphicsDevice, width, height, mipMap: false, SurfaceFormat.Color, DepthFormat.None, 0, RenderTargetUsage.PreserveContents);
+ 		allocateLightmap(width, height);
+ 		previousViewportPosition = Vector2.Zero;
+@@ -2611,9 +2830,13 @@ public class Game1 : InstanceGame
+ 			{
+ 				string rootpath = Content.RootDirectory;
+ 				audioEngine = new AudioEngineWrapper(new AudioEngine(Path.Combine(rootpath, "XACT", "FarmerSounds.xgs")));
+-				waveBank = new WaveBank(audioEngine.Engine, Path.Combine(rootpath, "XACT", "Wave Bank.xwb"));
+-				waveBank1_4 = new WaveBank(audioEngine.Engine, Path.Combine(rootpath, "XACT", "Wave Bank(1.4).xwb"));
++				waveBank = WaveBankLoader.Open(audioEngine.Engine, Path.Combine(rootpath, "XACT", "Wave Bank.xwb"));
++				waveBank1_4 = WaveBankLoader.Open(audioEngine.Engine, Path.Combine(rootpath, "XACT", "Wave Bank(1.4).xwb"));
+ 				soundBank = new SoundBankWrapper(new SoundBank(audioEngine.Engine, Path.Combine(rootpath, "XACT", "Sound Bank.xsb")));
++				if (!WaveBankLoader.WaitUntilPrepared(audioEngine.Engine, 5000, waveBank, waveBank1_4))
++				{
++					log.Warn("XACT wave banks were not prepared within 5 s; early cues may fail.");
++				}
+ 			}
+ 			catch (Exception exception)
+ 			{
+@@ -2635,7 +2858,13 @@ public class Game1 : InstanceGame
+ 
+ 	private void InitializeSerializers()
+ 	{
+-		otherFarmers.Serializer = SaveSerializer.GetSerializer(typeof(Farmer));
++		// Port: the farmhand serializer only carries other players' farmers over the network; on the
++		// Vita (single-player) building it at startup cost tens of seconds. Without it the net code
++		// falls back to its binary format.
++		if (!VitaPlatform.IsVita)
++		{
++			otherFarmers.Serializer = SaveSerializer.GetSerializer(typeof(Farmer));
++		}
+ 		if (StartupPreferences.serializer == null)
+ 		{
+ 			StartupPreferences.serializer = SaveSerializer.GetSerializer(typeof(StartupPreferences));
+@@ -2656,6 +2885,10 @@ public class Game1 : InstanceGame
+ 
+ 	protected internal virtual IDisplayDevice CreateDisplayDevice(ContentManager content, GraphicsDevice graphicsDevice)
+ 	{
++		if (MapMemoryManager.Enabled)
++		{
++			return new LowRamDisplayDevice(content, graphicsDevice);
++		}
+ 		return new XnaDisplayDevice(content, graphicsDevice);
+ 	}
+ 
+@@ -2674,6 +2907,7 @@ public class Game1 : InstanceGame
+ 		mapDisplayDevice = CreateDisplayDevice(content, GraphicsDevice);
+ 		spriteBatch = new SpriteBatch(GraphicsDevice);
+ 		netWorldState = new NetRoot<NetWorldState>(new NetWorldState());
++		ApplySavedLanguageBeforeContent();
+ 		LoadContentEnumerator = GetLoadContentEnumerator();
+ 		if (!ShouldLoadIncrementally)
+ 		{
+@@ -2685,8 +2919,36 @@ public class Game1 : InstanceGame
+ 		}
+ 	}
+ 
++	/// <summary>Apply the language saved in startup_preferences before the shared textures are loaded.</summary>
++	/// <remarks>
++	/// Low-RAM port: the original applied it only when the title menu opened, after LoadContent had
++	/// loaded every shared texture in English. Switching then loaded the localized variants too, and
++	/// the English copies stayed in the content cache (~12 MB for Turkish: Cursors, ControllerMaps,
++	/// springobjects, TitleButtons). XNA can't unload single assets, so avoid loading them at all.
++	/// The title menu still applies the preference later; with the same language that is a no-op.
++	/// </remarks>
++	private void ApplySavedLanguageBeforeContent()
++	{
++		if (!IsMainInstance)
++		{
++			return;
++		}
++		try
++		{
++			new StartupPreferences().loadPreferences(async: false, applyLanguage: true);
++		}
++		catch (Exception exception)
++		{
++			log.Error("Couldn't apply the saved language before loading content.", exception);
++		}
++	}
++
+ 	private void AfterLoadContent()
+ 	{
++		if (VitaPlatform.IsVita)
++		{
++			content.VitaMarkStartupAssetsComplete();
++		}
+ 		saveOnNewDay = true;
+ 		if (gameMode == 4)
+ 		{
+@@ -2858,6 +3120,7 @@ public class Game1 : InstanceGame
+ 		step = num;
+ 		yield return num;
+ 		controllerMaps = content.Load<Texture2D>("LooseSprites\\ControllerMaps");
++		Utility.VitaPatchControllerMaps(controllerMaps);
+ 		num = step + 1;
+ 		step = num;
+ 		yield return num;
+@@ -3015,6 +3278,7 @@ public class Game1 : InstanceGame
+ 
+ 	public static void resetPlayer()
+ 	{
++		player?.unload();
+ 		List<Item> farmersInitialTools = Farmer.initialTools();
+ 		player = new Farmer(new FarmerSprite(null), new Vector2(192f, 192f), 1, "", farmersInitialTools, isMale: true);
+ 	}
+@@ -3119,6 +3383,7 @@ public class Game1 : InstanceGame
+ 
+ 	public virtual void loadForNewGame(bool loadedGame = false)
+ 	{
++		IsLoadingSavedGame = loadedGame;
+ 		if (startingGameSeed.HasValue)
+ 		{
+ 			uniqueIDForThisGame = startingGameSeed.Value;
+@@ -3395,6 +3660,12 @@ public class Game1 : InstanceGame
+ 	public void CheckGamepadMode()
+ 	{
+ 		bool old_gamepad_active_state = options.gamepadControls;
++		if (VitaPlatform.IsVita)
++		{
++			// Port: the Vita's only input is its gamepad (no mouse, no keyboard, no touch).
++			options.gamepadControls = true;
++			return;
++		}
+ 		switch (options.gamepadMode)
+ 		{
+ 		case Options.GamepadModes.ForceOn:
+@@ -3411,10 +3682,6 @@ public class Game1 : InstanceGame
+ 		if ((mouseState.LeftButton == Microsoft.Xna.Framework.Input.ButtonState.Pressed || mouseState.MiddleButton == Microsoft.Xna.Framework.Input.ButtonState.Pressed || mouseState.RightButton == Microsoft.Xna.Framework.Input.ButtonState.Pressed || mouseState.ScrollWheelValue != _oldScrollWheelValue || ((mouseState.X != _oldMousePosition.X || mouseState.Y != _oldMousePosition.Y) && lastCursorMotionWasMouse) || keyState.GetPressedKeys().Length != 0) && (keyState.GetPressedKeys().Length != 1 || keyState.GetPressedKeys()[0] != Microsoft.Xna.Framework.Input.Keys.Pause))
+ 		{
+ 			non_gamepad_control_was_used = true;
+-			if (Program.sdk is SteamHelper steamHelper && steamHelper.IsRunningOnSteamDeck())
+-			{
+-				non_gamepad_control_was_used = false;
+-			}
+ 		}
+ 		_oldScrollWheelValue = mouseState.ScrollWheelValue;
+ 		_oldMousePosition.X = mouseState.X;
+@@ -3655,7 +3922,18 @@ public class Game1 : InstanceGame
+ 		{
+ 			exitToTitle = false;
+ 			CleanupReturningToTitle();
+-			Utility.CollectGarbage();
++			if (VitaPlatform.IsVita)
++			{
++				// Port: a full collection + finalizers so the closed game's world and textures free their native/GPU memory immediately.
++				GC.Collect();
++				GC.WaitForPendingFinalizers();
++				GC.Collect();
++				VitaPlatform.Trace($"exit to title: managed heap {GC.GetTotalMemory(forceFullCollection: false) / 1024} KB, vitaGL free {VitaPlatform.GraphicsFreeKB()} KB after a full collection");
++			}
++			else
++			{
++				Utility.CollectGarbage();
++			}
+ 			postExitToTitleCallback?.Invoke();
+ 		}
+ 		SetFreeCursorElapsed((float)gameTime.ElapsedGameTime.TotalSeconds);
+@@ -3698,7 +3976,7 @@ public class Game1 : InstanceGame
+ 			UpdateChatBox();
+ 			return;
+ 		}
+-		if (quit)
++		if (quit && !VitaPlatform.IsVita)
+ 		{
+ 			Exit();
+ 		}
+@@ -3716,6 +3994,10 @@ public class Game1 : InstanceGame
+ 			{
+ 				screenFade.UpdateGlobalFade();
+ 			}
++			else if (!hasShownHostIpInChat && (IsServer || multiplayerMode == 2) && chatBox != null)
++			{
++				ShowHostIpInChat();
++			}
+ 			else if (pauseThenDoFunctionTimer > 0)
+ 			{
+ 				freezeControls = true;
+@@ -4063,9 +4345,13 @@ public class Game1 : InstanceGame
+ 						}
+ 						else if (activeClickableMenu != null)
+ 						{
++							double sectionStart = VitaPlatform.BeginSection();
+ 							PushUIMode();
+ 							updateActiveMenu(gameTime);
+ 							PopUIMode();
++							// The chest shortcut (L + R + up) works with a chest open; the others stay field-only.
++							VitaCameraShortcut();
++							VitaPlatform.EndSection("menu", sectionStart);
+ 						}
+ 						else
+ 						{
+@@ -4075,7 +4361,13 @@ public class Game1 : InstanceGame
+ 							}
+ 							if (!globalFade && !freezeControls && activeClickableMenu == null && (IsActiveNoOverlay || inputSimulator != null))
+ 							{
++								double sectionStart = VitaPlatform.BeginSection();
+ 								UpdateControlInput(gameTime);
++								VitaAutoActions.Update();
++								VitaTractorMod.Update();
++								VitaQoLOverlay.Update(gameTime);
++								VitaCameraShortcut();
++								VitaPlatform.EndSection("input", sectionStart);
+ 							}
+ 						}
+ 					}
+@@ -4097,12 +4389,21 @@ public class Game1 : InstanceGame
+ 					{
+ 						if (!HostPaused && !showingEndOfNightStuff)
+ 						{
++							double sectionStart = VitaPlatform.BeginSection();
++							// Port: the rest of the last ten-minute update, a few ms a frame.
++							VitaRunTenMinuteQueue(VitaTenMinuteBudgetMs);
+ 							if (IsMultiplayer || (activeClickableMenu == null && currentMinigame == null) || player.viewingLocation.Value != null)
+ 							{
+ 								UpdateGameClock(gameTime);
+ 							}
++							VitaPlatform.EndSection("clock", sectionStart);
++							sectionStart = VitaPlatform.BeginSection();
+ 							UpdateCharacters(gameTime);
++							VitaPlatform.EndSection("characters", sectionStart);
++							sectionStart = VitaPlatform.BeginSection();
+ 							UpdateLocations(gameTime);
++							VitaPlatform.EndSection("locations", sectionStart);
++							sectionStart = VitaPlatform.BeginSection();
+ 							if (currentMinigame == null)
+ 							{
+ 								UpdateViewPort(overrideFreeze: false, getViewportCenter());
+@@ -4112,7 +4413,10 @@ public class Game1 : InstanceGame
+ 								previousViewportPosition.X = viewport.X;
+ 								previousViewportPosition.Y = viewport.Y;
+ 							}
++							VitaPlatform.EndSection("viewport", sectionStart);
++							sectionStart = VitaPlatform.BeginSection();
+ 							UpdateOther(gameTime);
++							VitaPlatform.EndSection("other", sectionStart);
+ 						}
+ 						if (messagePause)
+ 						{
+@@ -4156,6 +4460,7 @@ public class Game1 : InstanceGame
+ 				}
+ 			}
+ 			audioEngine?.Update();
++			if (FinishedFirstInitSounds) VitaAudioWarmup.Update();
+ 			UpdateChatBox();
+ 			if (gameMode != 6)
+ 			{
+@@ -4186,7 +4491,87 @@ public class Game1 : InstanceGame
+ 		}
+ 	}
+ 
++	/// <summary>Port: the reads <see cref="M:StardewValley.Game1.OnDayStarted" /> does on the Vita, also called at the end of a save's loading screen so the first frame of play (OnDayStarted runs on it) doesn't do them: they were a 0.5-1 s drop right after loading. Cached, so the second call is cheap.</summary>
++	public static void VitaPreloadForDay()
++	{
++		if (!VitaPlatform.IsVita)
++		{
++			return;
++		}
++		PreloadDayData();
++		foreach (NPC character in Utility.getAllCharacters())
++		{
++			if (character.IsVillager)
++			{
++				_ = character.Dialogue;
++			}
++		}
++	}
++
++	public static bool hasShownHostIpInChat;
++
++	public static void ShowHostIpInChat()
++	{
++		if (chatBox == null || (!IsServer && multiplayerMode != 2))
++		{
++			return;
++		}
++		hasShownHostIpInChat = true;
++		string ip = VitaPlatform.GetHostIpAddress();
++		if (!string.IsNullOrEmpty(ip))
++		{
++			string msg = VitaPlatform.IsTr
++				? $"[LAN Sunucusu] IP Adresi: {ip} (Port: 24642)"
++				: $"[LAN Server] IP Address: {ip} (Port: 24642)";
++			chatBox.addMessage(msg, new Color(104, 214, 255));
++			if (chatBox.messages.Count > 0)
++			{
++				chatBox.messages[chatBox.messages.Count - 1].timeLeftToDisplay = 1200;
++			}
++		}
++		else
++		{
++			string msg = VitaPlatform.IsTr
++				? "[LAN Sunucusu] Yerel IP alınamadı (Wi-Fi bağlantısını kontrol edin)"
++				: "[LAN Server] Could not get local IP (Check Wi-Fi connection)";
++			chatBox.addMessage(msg, Color.OrangeRed);
++			if (chatBox.messages.Count > 0)
++			{
++				chatBox.messages[chatBox.messages.Count - 1].timeLeftToDisplay = 1200;
++			}
++		}
++	}
++
+ 	public static void OnDayStarted()
++	{
++		if (VitaPlatform.IsVita)
++		{
++			PreloadDayData();
++		}
++		OnDayStartedImpl();
++		hasShownHostIpInChat = false;
++	}
++
++	private static void PreloadDayData()
++	{
++		// Port: read on first use otherwise, which stalled the first shop (1.5 s) and the first look at
++		// the map (0.2 s) on the Vita. Game1.content keeps them, so this costs once per session.
++		DataLoader.Shops(content);
++		DataLoader.WorldMap(content);
++		// The first game menu of a session read these too (with its own work, ~800 ms on Start): the
++		// mail and powers data, the strings its pages use, the valley map's texture.
++		DataLoader.Mail(content);
++		DataLoader.Powers(content);
++		content.Load<Dictionary<string, string>>("Strings\\1_6_Strings");
++		content.Load<Dictionary<string, string>>("Strings\\Locations");
++		foreach (StardewValley.WorldMaps.MapRegion region in StardewValley.WorldMaps.WorldMapManager.GetMapRegions())
++		{
++			region.GetBaseTexture();
++			break;
++		}
++	}
++
++	private static void OnDayStartedImpl()
+ 	{
+ 		TriggerActionManager.Raise("DayStarted");
+ 		Utility.ForEachLocation((GameLocation location) =>
+@@ -4198,6 +4583,13 @@ public class Game1 : InstanceGame
+ 		foreach (NPC allCharacter in Utility.getAllCharacters())
+ 		{
+ 			allCharacter.OnDayStarted();
++			if (VitaPlatform.IsVita && allCharacter.IsVillager)
++			{
++				// Port: each villager's dialogue sheet is otherwise read when first needed, often by the
++				// 10-minute update's ambient chatter check: 30-70 ms from the memory card, a stall at a
++				// random moment of the day for every villager. Same sheet, read while the day starts.
++				_ = allCharacter.Dialogue;
++			}
+ 		}
+ 		Utility.ForEachLocation((GameLocation location) =>
+ 		{
+@@ -5244,43 +5636,39 @@ public class Game1 : InstanceGame
+ 		graphics.ToggleFullScreen();
+ 		graphics.ApplyChanges();
+ 		updateViewportForScreenSizeChange(fullscreenChange: true, graphics.PreferredBackBufferWidth, graphics.PreferredBackBufferHeight);
+-		Form form = Control.FromHandle(Program.gamePtr.Window.Handle).FindForm();
+-		form.FormBorderStyle = ((!isFullscreen) ? FormBorderStyle.Sizable : FormBorderStyle.None);
+-		form.WindowState = FormWindowState.Normal;
+ 		GameRunner.instance.OnWindowSizeChange(null, null);
+ 	}
+ 
+ 	public static void toggleFullscreen()
+ 	{
+-		Form form = Control.FromHandle(Program.gamePtr.Window.Handle).FindForm();
+-		if (options.windowedBorderlessFullscreen || form.WindowState == FormWindowState.Maximized)
++		// FNA: there is no WinForms Form behind the window (Window.Handle is an SDL window), so
++		// windowed borderless and fullscreen both map to FNA's borderless fullscreen-desktop mode.
++		SetFullscreen(!graphics.IsFullScreen);
++	}
++
++	/// <summary>Switch between FNA's borderless fullscreen-desktop mode and a normal window.</summary>
++	/// <remarks>
++	/// Port: a window at the fullscreen resolution covers the whole desktop and looks fullscreen, so a
++	/// window gets three quarters of the display, at most 1280x720.
++	/// </remarks>
++	public static void SetFullscreen(bool fullscreen)
++	{
++		// Port: the Vita has no windowed mode; every window option stays fullscreen at the screen size.
++		fullscreen |= VitaPlatform.IsVita;
++		DisplayMode display = graphics.GraphicsDevice.Adapter.CurrentDisplayMode;
++		if (fullscreen)
+ 		{
+-			if (form.WindowState != FormWindowState.Maximized || form.FormBorderStyle != FormBorderStyle.None)
+-			{
+-				form.FormBorderStyle = FormBorderStyle.None;
+-				form.WindowState = FormWindowState.Maximized;
+-			}
+-			else
+-			{
+-				form.FormBorderStyle = FormBorderStyle.Sizable;
+-				form.WindowState = FormWindowState.Normal;
+-				if (options.fullscreen && !options.windowedBorderlessFullscreen)
+-				{
+-					GameRunner.instance.OnWindowSizeChange(null, null);
+-					if (options.preferredResolutionX != 0 && options.preferredResolutionY != 0)
+-					{
+-						graphics.PreferredBackBufferWidth = options.preferredResolutionX;
+-						graphics.PreferredBackBufferHeight = options.preferredResolutionY;
+-					}
+-					toggleNonBorderlessWindowedFullscreen();
+-					return;
+-				}
+-			}
++			graphics.PreferredBackBufferWidth = display.Width;
++			graphics.PreferredBackBufferHeight = display.Height;
+ 		}
+ 		else
+ 		{
+-			toggleNonBorderlessWindowedFullscreen();
++			graphics.PreferredBackBufferWidth = Math.Min(1280, display.Width * 3 / 4);
++			graphics.PreferredBackBufferHeight = Math.Min(720, display.Height * 3 / 4);
+ 		}
++		graphics.IsFullScreen = fullscreen;
++		graphics.ApplyChanges();
++		updateViewportForScreenSizeChange(fullscreenChange: true, graphics.PreferredBackBufferWidth, graphics.PreferredBackBufferHeight);
+ 		GameRunner.instance.OnWindowSizeChange(null, null);
+ 	}
+ 
+@@ -5359,7 +5747,7 @@ public class Game1 : InstanceGame
+ 
+ 	internal void UpdateTitleScreen(GameTime time)
+ 	{
+-		if (quit)
++		if (quit && !VitaPlatform.IsVita)
+ 		{
+ 			Exit();
+ 			changeMusicTrack("none");
+@@ -5390,15 +5778,8 @@ public class Game1 : InstanceGame
+ 		}
+ 		if (game1.instanceIndex > 0)
+ 		{
+-			if (activeClickableMenu == null && ticks > 1)
+-			{
+-				activeClickableMenu = new FarmhandMenu(multiplayer.InitClient(new LidgrenClient("localhost")));
+-				activeClickableMenu.populateClickableComponentList();
+-				if (options.SnappyMenus)
+-				{
+-					activeClickableMenu.snapToDefaultClickableComponent();
+-				}
+-			}
++			// Single-player build: split-screen instances joined the host over Lidgren
++			// localhost, which is removed; extra instances do nothing.
+ 			return;
+ 		}
+ 		if (fadeToBlackAlpha < 1f && fadeIn)
+@@ -5544,6 +5925,10 @@ public class Game1 : InstanceGame
+ 		return count;
+ 	}
+ 
++	private GameTime _updateLocationsTime;
++
++	private Func<GameLocation, bool> _updateLocationsAction;
++
+ 	private void UpdateLocations(GameTime time)
+ 	{
+ 		loopingLocationCues.Update(currentLocation);
+@@ -5558,9 +5943,11 @@ public class Game1 : InstanceGame
+ 				return;
+ 			}
+ 		}
+-		Utility.ForEachLocation((GameLocation location) =>
++		// Port: one cached delegate instead of a closure and a delegate allocated every tick.
++		_updateLocationsTime = time;
++		Utility.ForEachLocation(_updateLocationsAction ??= delegate(GameLocation location)
+ 		{
+-			_UpdateLocation(location, time);
++			_UpdateLocation(location, _updateLocationsTime);
+ 			return true;
+ 		});
+ 		if (currentLocation.IsTemporary)
+@@ -5573,8 +5960,11 @@ public class Game1 : InstanceGame
+ 
+ 	protected void _UpdateLocation(GameLocation location, GameTime time)
+ 	{
+-		bool shouldUpdate = location.farmers.Any();
+-		if (!shouldUpdate && location.CanBeRemotedlyViewed())
++		// Port: alone, the only farmer is the player; farmers.Any() is what this answers, without
++		// enumerating the farmer collection for each of the ~100 locations every tick.
++		bool shouldUpdate = (otherFarmers.Count == 0) ? (player.currentLocation != null && location.Equals(player.currentLocation)) : location.farmers.Any();
++		// Port: alone, shouldUpdate already covers player.currentLocation and nobody else views a location.
++		if (!shouldUpdate && otherFarmers.Count != 0 && location.CanBeRemotedlyViewed())
+ 		{
+ 			if (player.currentLocation == location)
+ 			{
+@@ -5594,9 +5984,13 @@ public class Game1 : InstanceGame
+ 		}
+ 		if (shouldUpdate)
+ 		{
++			long hereStart = VitaPlatform.BeginHotSection();
+ 			location.UpdateWhenCurrentLocation(time);
++			VitaPlatform.EndHotSection(VitaPlatform.HotSection.Here, hereStart);
+ 		}
++		long allStart = VitaPlatform.BeginHotSection();
+ 		location.updateEvenIfFarmerIsntHere(time);
++		VitaPlatform.EndHotSection(VitaPlatform.HotSection.AllLocations, allStart);
+ 		if (location.wasInhabited != shouldUpdate)
+ 		{
+ 			location.wasInhabited = shouldUpdate;
+@@ -5609,6 +6003,8 @@ public class Game1 : InstanceGame
+ 
+ 	public static void performTenMinuteClockUpdate()
+ 	{
++		// Port: the previous tick's spread updates (Vita) all run before the next.
++		VitaRunTenMinuteQueue(double.MaxValue);
+ 		hooks.OnGame1_PerformTenMinuteClockUpdate(() =>
+ 		{
+ 			int num = getTrulyDarkTime(currentLocation) - 100;
+@@ -5730,67 +6126,270 @@ public class Game1 : InstanceGame
+ 					showGlobalMessage(TokenParser.ParseText(data.StartMessage));
+ 				}
+ 			}
+-			foreach (GameLocation location in locations)
++			if (VitaPlatform.IsVita)
+ 			{
+-				GameLocation current2 = location;
+-				if (current2.NameOrUniqueName == currentLocation.NameOrUniqueName)
++				// Port: every character's part now, in the game's order; the rest of the locations that allow it over the next frames (see _vitaTenMinuteQueue).
++				_vitaTenMinuteQueue.Clear();
++				_vitaTenMinuteNext = 0;
++				_vitaTenMinuteTime = timeOfDay;
++				_vitaObjectPasses.Clear();
++				_vitaObjectPassNext = 0;
++				_vitaObjectPassIndex = -1;
++				_vitaObjectPassSnapshot.Clear();
++				double tickStart = VitaPlatform.BeginSection();
++				// The objects' and machines' pass of every location updated now (the farm, its buildings' interiors) waits for the next frames too.
++				GameLocation.VitaDeferObjectPasses = true;
++				try
++				{
++					foreach (GameLocation location in locations)
++					{
++						GameLocation current2 = location;
++						if (current2.NameOrUniqueName == currentLocation.NameOrUniqueName)
++						{
++							current2 = currentLocation;
++						}
++						if (current2 != currentLocation && current2.VitaCanSplitTenMinuteUpdate())
++						{
++							current2.VitaTenMinuteCharacters(timeOfDay);
++							_vitaTenMinuteQueue.Add(current2);
++						}
++						else
++						{
++							VitaTenMinuteUpdateOf(current2, timeOfDay);
++						}
++					}
++				}
++				finally
+ 				{
+-					current2 = currentLocation;
++					GameLocation.VitaDeferObjectPasses = false;
+ 				}
+-				current2.performTenMinuteUpdate(timeOfDay);
+-				current2.timeUpdate(10);
++				VitaPlatform.TraceIfSlow($"ten-minute update on time ({_vitaTenMinuteQueue.Count} locations and {_vitaObjectPasses.Count} object passes left for the next frames)", tickStart, 20.0);
++				_vitaTenMinutePending = true;
++				VitaRunTenMinuteQueue(0.0);
++				return;
+ 			}
+-			MineShaft.UpdateMines10Minutes(timeOfDay);
+-			VolcanoDungeon.UpdateLevels10Minutes(timeOfDay);
+-			if (IsMasterGame && farmEvent == null)
++			foreach (GameLocation location in locations)
+ 			{
+-				netWorldState.Value.UpdateFromGame1();
++				VitaTenMinuteUpdateOf(location, timeOfDay);
+ 			}
+-			currentLightSources.RemoveWhere((KeyValuePair<string, LightSource> p) => p.Value.color.A <= 0);
++			VitaFinishTenMinuteUpdate(timeOfDay);
+ 		});
+ 	}
+ 
+-	public static bool shouldPlayMorningSong(bool loading_game = false)
++	/// <summary>Port: the locations whose ten-minute update still has its late part to run, in the game's order, from <see cref="_vitaTenMinuteNext" />.</summary>
++	/// <remarks>
++	/// Every location's performTenMinuteUpdate ran in the frame the clock ticked: 25-35 ms each tick (machines and objects
++	/// everywhere, NPC schedules in the shops: FishShop 22 ms, SeedShop 15 ms), 50-86 ms at times, a dropped frame or more
++	/// every 7 seconds of play; lightning is decided in the same frame, so it seemed to strike with a stutter.
++	/// On the Vita the tick's frame still runs, in the game's order, every character's part (schedules: an NPC crossing
++	/// between locations a frame later can neither miss nor repeat one) and the whole update of the player's location and of
++	/// every location <see cref="GameLocation.VitaCanSplitTenMinuteUpdate" /> keeps whole. The rest of the others (furniture,
++	/// objects and machines, fish and ore spots: nothing a character or another location sees) runs over the next frames,
++	/// about 4 ms a frame, then the steps that followed the loop. A change of location, the next tick, a new day and
++	/// returning to the title all finish (or drop) what is left first, so the late parts see the same world they would have.
++	/// </remarks>
++	private static readonly List<GameLocation> _vitaTenMinuteQueue = new List<GameLocation>();
++
++	private static int _vitaTenMinuteNext;
++
++	private static int _vitaTenMinuteTime;
++
++	private static bool _vitaTenMinutePending;
++
++	private const double VitaTenMinuteBudgetMs = 4.0;
++
++	/// <summary>Port: a location's objects' ten-minute pass (<see cref="GameLocation.passTimeForObjects" />) left from the clock's tick.</summary>
++	private struct VitaObjectPass
+ 	{
+-		if (eventUp)
+-		{
+-			return false;
+-		}
+-		if ((double)options.musicVolumeLevel <= 0.025)
+-		{
+-			return false;
+-		}
+-		if (timeOfDay >= 1200)
++		public GameLocation Location;
++
++		public int Minutes;
++	}
++
++	/// <summary>
++	/// Port: the objects' passes of the locations updated whole when the clock ticked (the player's location, the farm and
++	/// its buildings' interiors, full of machines, kegs and fences), run over the next frames like the late parts above:
++	/// a farm's thousands of objects were most of the 33-49 ms tick frames logged there. Each pass works from a snapshot
++	/// of the objects, a few dozen at a time, and skips one picked up or replaced since. Machines finish a frame or two
++	/// later than the tick; nothing a character or another location sees runs in it.
++	/// </summary>
++	private static readonly List<VitaObjectPass> _vitaObjectPasses = new List<VitaObjectPass>();
++
++	private static int _vitaObjectPassNext;
++
++	/// <summary>Port: where the current pass is in <see cref="_vitaObjectPassSnapshot" />; -1 before it starts.</summary>
++	private static int _vitaObjectPassIndex = -1;
++
++	private static readonly List<KeyValuePair<Vector2, Object>> _vitaObjectPassSnapshot = new List<KeyValuePair<Vector2, Object>>();
++
++	internal static void VitaQueueObjectPass(GameLocation location, int minutes)
++	{
++		_vitaObjectPasses.Add(new VitaObjectPass
+ 		{
+-			return false;
+-		}
+-		if (!loading_game)
++			Location = location,
++			Minutes = minutes
++		});
++	}
++
++	/// <summary>Port: runs queued object passes until <paramref name="budgetMs" /> is used; false if some are left.</summary>
++	private static bool VitaRunObjectPasses(double start, double budgetMs)
++	{
++		while (_vitaObjectPassNext < _vitaObjectPasses.Count)
+ 		{
+-			if (currentSong != null)
++			VitaObjectPass pass = _vitaObjectPasses[_vitaObjectPassNext];
++			if (_vitaObjectPassIndex < 0)
+ 			{
+-				return IsPlayingOutdoorsAmbience;
++				if (VitaPlatform.ElapsedSince(start) >= budgetMs)
++				{
++					return false;
++				}
++				_vitaObjectPassSnapshot.Clear();
++				foreach (KeyValuePair<Vector2, Object> pair in pass.Location.objects.Pairs)
++				{
++					_vitaObjectPassSnapshot.Add(pair);
++				}
++				_vitaObjectPassIndex = 0;
+ 			}
+-			return false;
++			while (_vitaObjectPassIndex < _vitaObjectPassSnapshot.Count)
++			{
++				if ((_vitaObjectPassIndex & 31) == 0 && VitaPlatform.ElapsedSince(start) >= budgetMs)
++				{
++					return false;
++				}
++				KeyValuePair<Vector2, Object> pair2 = _vitaObjectPassSnapshot[_vitaObjectPassIndex++];
++				if (pass.Location.objects.TryGetValue(pair2.Key, out Object current) && current == pair2.Value && current.minutesElapsed(pass.Minutes))
++				{
++					pass.Location.objects.Remove(pair2.Key);
++				}
++			}
++			_vitaObjectPassSnapshot.Clear();
++			_vitaObjectPassIndex = -1;
++			_vitaObjectPassNext++;
+ 		}
++		_vitaObjectPasses.Clear();
++		_vitaObjectPassNext = 0;
+ 		return true;
+ 	}
+ 
+-	public static void UpdateGameClock(GameTime time)
++	/// <summary>Port: runs queued ten-minute updates for up to <paramref name="budgetMs" /> (at least one), then the closing steps once all are done.</summary>
++	public static void VitaRunTenMinuteQueue(double budgetMs)
+ 	{
+-		if (shouldTimePass() && !IsClient)
++		if (!_vitaTenMinutePending || _vitaTenMinuteRunning)
+ 		{
+-			gameTimeInterval += time.ElapsedGameTime.Milliseconds;
++			return;
+ 		}
+-		if (timeOfDay >= getTrulyDarkTime(currentLocation))
++		_vitaTenMinuteRunning = true;
++		try
+ 		{
+-			int adjustedTime = (int)((float)(timeOfDay - timeOfDay % 100) + (float)(timeOfDay % 100 / 10) * 16.66f);
+-			float transparency = Math.Min(0.93f, 0.75f + ((float)(adjustedTime - getTrulyDarkTime(currentLocation)) + (float)gameTimeInterval / (float)realMilliSecondsPerGameTenMinutes * 16.6f) * 0.000625f);
+-			outdoorLight = (IsRainingHere() ? ambientLight : eveningColor) * transparency;
++			VitaRunTenMinuteQueueSteps(budgetMs);
+ 		}
+-		else if (timeOfDay >= getStartingToGetDarkTime(currentLocation))
++		finally
+ 		{
+-			int adjustedTime2 = (int)((float)(timeOfDay - timeOfDay % 100) + (float)(timeOfDay % 100 / 10) * 16.66f);
+-			float transparency2 = Math.Min(0.93f, 0.3f + ((float)(adjustedTime2 - getStartingToGetDarkTime(currentLocation)) + (float)gameTimeInterval / (float)realMilliSecondsPerGameTenMinutes * 16.6f) * 0.00225f);
++			_vitaTenMinuteRunning = false;
++		}
++	}
++
++	private static bool _vitaTenMinuteRunning;
++
++	private static void VitaRunTenMinuteQueueSteps(double budgetMs)
++	{
++		double start = VitaPlatform.BeginSection();
++		while (_vitaTenMinuteNext < _vitaTenMinuteQueue.Count)
++		{
++			if (VitaPlatform.ElapsedSince(start) >= budgetMs)
++			{
++				return;
++			}
++			GameLocation location = _vitaTenMinuteQueue[_vitaTenMinuteNext++];
++			// Its characters' part ran when the clock ticked.
++			GameLocation.VitaCharactersAlreadyUpdated = true;
++			try
++			{
++				double tenMinuteStart = VitaPlatform.BeginSection();
++				location.performTenMinuteUpdate(_vitaTenMinuteTime);
++				location.timeUpdate(10);
++				VitaPlatform.TraceIfSlow("late ten-minute update of " + location.NameOrUniqueName, tenMinuteStart, 10.0);
++			}
++			finally
++			{
++				GameLocation.VitaCharactersAlreadyUpdated = false;
++			}
++		}
++		if (!VitaRunObjectPasses(start, budgetMs))
++		{
++			return;
++		}
++		_vitaTenMinutePending = false;
++		_vitaTenMinuteQueue.Clear();
++		VitaFinishTenMinuteUpdate(_vitaTenMinuteTime);
++	}
++
++	private static void VitaTenMinuteUpdateOf(GameLocation location, int time)
++	{
++		GameLocation current2 = location;
++		if (current2.NameOrUniqueName == currentLocation.NameOrUniqueName)
++		{
++			current2 = currentLocation;
++		}
++		double tenMinuteStart = VitaPlatform.BeginSection();
++		current2.performTenMinuteUpdate(time);
++		current2.timeUpdate(10);
++		VitaPlatform.TraceIfSlow("ten-minute update of " + current2.NameOrUniqueName, tenMinuteStart, 10.0);
++	}
++
++	/// <summary>The steps after every location's ten-minute update (the end of the game's performTenMinuteClockUpdate).</summary>
++	private static void VitaFinishTenMinuteUpdate(int time)
++	{
++		MineShaft.UpdateMines10Minutes(time);
++		VolcanoDungeon.UpdateLevels10Minutes(time);
++		if (IsMasterGame && farmEvent == null)
++		{
++			netWorldState.Value.UpdateFromGame1();
++		}
++		currentLightSources.RemoveWhere((KeyValuePair<string, LightSource> p) => p.Value.color.A <= 0);
++	}
++
++	public static bool shouldPlayMorningSong(bool loading_game = false)
++	{
++		if (eventUp)
++		{
++			return false;
++		}
++		if ((double)options.musicVolumeLevel <= 0.025)
++		{
++			return false;
++		}
++		if (timeOfDay >= 1200)
++		{
++			return false;
++		}
++		if (!loading_game)
++		{
++			if (currentSong != null)
++			{
++				return IsPlayingOutdoorsAmbience;
++			}
++			return false;
++		}
++		return true;
++	}
++
++	public static void UpdateGameClock(GameTime time)
++	{
++		if (shouldTimePass() && !IsClient)
++		{
++			gameTimeInterval += time.ElapsedGameTime.Milliseconds;
++		}
++		if (timeOfDay >= getTrulyDarkTime(currentLocation))
++		{
++			int adjustedTime = (int)((float)(timeOfDay - timeOfDay % 100) + (float)(timeOfDay % 100 / 10) * 16.66f);
++			float transparency = Math.Min(0.93f, 0.75f + ((float)(adjustedTime - getTrulyDarkTime(currentLocation)) + (float)gameTimeInterval / (float)realMilliSecondsPerGameTenMinutes * 16.6f) * 0.000625f);
++			outdoorLight = (IsRainingHere() ? ambientLight : eveningColor) * transparency;
++		}
++		else if (timeOfDay >= getStartingToGetDarkTime(currentLocation))
++		{
++			int adjustedTime2 = (int)((float)(timeOfDay - timeOfDay % 100) + (float)(timeOfDay % 100 / 10) * 16.66f);
++			float transparency2 = Math.Min(0.93f, 0.3f + ((float)(adjustedTime2 - getStartingToGetDarkTime(currentLocation)) + (float)gameTimeInterval / (float)realMilliSecondsPerGameTenMinutes * 16.6f) * 0.00225f);
+ 			outdoorLight = (IsRainingHere() ? ambientLight : eveningColor) * transparency2;
+ 		}
+ 		else if (IsRainingHere())
+@@ -6309,11 +6908,13 @@ public class Game1 : InstanceGame
+ 		}
+ 		if (currentLocation.IsOutdoors && currentLocation.IsRainingHere())
+ 		{
++			// All drops share this tick duration; avoid 70 software 64-bit divisions.
++			int rainElapsedMs = Utility.ElapsedMs(time.ElapsedGameTime);
+ 			for (int i = 0; i < rainDrops.Length; i++)
+ 			{
+ 				if (rainDrops[i].frame == 0)
+ 				{
+-					rainDrops[i].accumulator += time.ElapsedGameTime.Milliseconds;
++					rainDrops[i].accumulator += rainElapsedMs;
+ 					if (rainDrops[i].accumulator < 70)
+ 					{
+ 						continue;
+@@ -6339,7 +6940,7 @@ public class Game1 : InstanceGame
+ 					}
+ 					continue;
+ 				}
+-				rainDrops[i].accumulator += time.ElapsedGameTime.Milliseconds;
++				rainDrops[i].accumulator += rainElapsedMs;
+ 				if (rainDrops[i].accumulator > 70)
+ 				{
+ 					rainDrops[i].frame = (rainDrops[i].frame + 1) % 4;
+@@ -7127,6 +7728,10 @@ public class Game1 : InstanceGame
+ 				}
+ 			}
+ 			locations.Add(location);
++			if (VitaPlatform.IsVita && locations.Count % 8 == 0)
++			{
++				GC.Collect(1, GCCollectionMode.Forced);
++			}
+ 		}
+ 		for (int i = 1; i < netWorldState.Value.HighestPlayerLimit; i++)
+ 		{
+@@ -7430,6 +8035,8 @@ public class Game1 : InstanceGame
+ 
+ 	public static void newDayAfterFade(Action after)
+ 	{
++		// Port: the day ends with every location's last ten-minute update done (Vita).
++		VitaRunTenMinuteQueue(double.MaxValue);
+ 		if (player.currentLocation != null)
+ 		{
+ 			if (player.rightRing.Value != null)
+@@ -7440,6 +8047,7 @@ public class Game1 : InstanceGame
+ 			{
+ 				player.leftRing.Value.onLeaveLocation(player, player.currentLocation);
+ 			}
++			VitaExtraRings.OnLeaveLocation(player, player.currentLocation);
+ 		}
+ 		if (LocalMultiplayer.IsLocalMultiplayer())
+ 		{
+@@ -10279,6 +10887,11 @@ public class Game1 : InstanceGame
+ 
+ 	public static void createMultipleObjectDebris(string id, int xTile, int yTile, int number)
+ 	{
++		if (VitaPlatform.MinimalDebris && number > 1)
++		{
++			currentLocation?.debris.Add(new Debris(id, number, new Vector2(xTile * 64 + 32, yTile * 64 + 32), player.getStandingPosition()));
++			return;
++		}
+ 		for (int i = 0; i < number; i++)
+ 		{
+ 			createObjectDebris(id, xTile, yTile);
+@@ -10287,6 +10900,11 @@ public class Game1 : InstanceGame
+ 
+ 	public static void createMultipleObjectDebris(string id, int xTile, int yTile, int number, GameLocation location)
+ 	{
++		if (VitaPlatform.MinimalDebris && number > 1)
++		{
++			(location ?? currentLocation)?.debris.Add(new Debris(id, number, new Vector2(xTile * 64 + 32, yTile * 64 + 32), player.getStandingPosition()));
++			return;
++		}
+ 		for (int i = 0; i < number; i++)
+ 		{
+ 			createObjectDebris(id, xTile, yTile, -1, 0, 1f, location);
+@@ -10295,6 +10913,11 @@ public class Game1 : InstanceGame
+ 
+ 	public static void createMultipleObjectDebris(string id, int xTile, int yTile, int number, float velocityMultiplier)
+ 	{
++		if (VitaPlatform.MinimalDebris && number > 1)
++		{
++			currentLocation?.debris.Add(new Debris(id, number, new Vector2(xTile * 64 + 32, yTile * 64 + 32), player.getStandingPosition(), velocityMultiplier));
++			return;
++		}
+ 		for (int i = 0; i < number; i++)
+ 		{
+ 			createObjectDebris(id, xTile, yTile, -1, 0, velocityMultiplier);
+@@ -10303,6 +10926,12 @@ public class Game1 : InstanceGame
+ 
+ 	public static void createMultipleObjectDebris(string id, int xTile, int yTile, int number, long who)
+ 	{
++		if (VitaPlatform.MinimalDebris && number > 1)
++		{
++			Farmer forPlayer = GetPlayer(who) ?? player;
++			currentLocation?.debris.Add(new Debris(id, number, new Vector2(xTile * 64 + 32, yTile * 64 + 32), forPlayer.getStandingPosition()));
++			return;
++		}
+ 		for (int i = 0; i < number; i++)
+ 		{
+ 			createObjectDebris(id, xTile, yTile, who);
+@@ -10311,6 +10940,12 @@ public class Game1 : InstanceGame
+ 
+ 	public static void createMultipleObjectDebris(string id, int xTile, int yTile, int number, long who, GameLocation location)
+ 	{
++		if (VitaPlatform.MinimalDebris && number > 1)
++		{
++			Farmer forPlayer = GetPlayer(who) ?? player;
++			(location ?? currentLocation)?.debris.Add(new Debris(id, number, new Vector2(xTile * 64 + 32, yTile * 64 + 32), forPlayer.getStandingPosition()));
++			return;
++		}
+ 		for (int i = 0; i < number; i++)
+ 		{
+ 			createObjectDebris(id, xTile, yTile, who, location);
+@@ -10377,6 +11012,11 @@ public class Game1 : InstanceGame
+ 
+ 	public static void createMultipleItemDebris(Item item, Vector2 pixelOrigin, int direction, GameLocation location = null, int groundLevel = -1, bool flopFish = false)
+ 	{
++		if (VitaPlatform.MinimalDebris && item.Stack > 1)
++		{
++			createItemDebris(item, pixelOrigin, (direction == -1) ? random.Next(4) : direction, location, groundLevel, flopFish);
++			return;
++		}
+ 		int stack = item.Stack;
+ 		item.Stack = 1;
+ 		createItemDebris(item, pixelOrigin, (direction == -1) ? random.Next(4) : direction, location, groundLevel, flopFish);
+@@ -10395,6 +11035,19 @@ public class Game1 : InstanceGame
+ 		Vector2 debrisOrigin = new Vector2(xTile * 64 + 64, yTile * 64 + 64);
+ 		if (item)
+ 		{
++			if (VitaPlatform.MinimalDebris && numberOfChunks > 1)
++			{
++				Vector2 offset = random.Next(4) switch
++				{
++					0 => new Vector2(-64f, 0f), 
++					1 => new Vector2(64f, 0f), 
++					2 => new Vector2(0f, 64f), 
++					_ => new Vector2(0f, -64f), 
++				};
++				Item debris = ItemRegistry.Create("(O)" + debrisType, numberOfChunks);
++				location.debris.Add(new Debris(debris, debrisOrigin, debrisOrigin + offset));
++				numberOfChunks = 0;
++			}
+ 			while (numberOfChunks > 0)
+ 			{
+ 				Vector2 offset = random.Next(4) switch
+@@ -10411,6 +11064,14 @@ public class Game1 : InstanceGame
+ 		}
+ 		if (resource)
+ 		{
++			if (VitaPlatform.MinimalDebris)
++			{
++				if (numberOfChunks > 0)
++				{
++					location.debris.Add(new Debris(debrisType, numberOfChunks, debrisOrigin, debrisOrigin + new Vector2(64f, 0f)));
++				}
++				return;
++			}
+ 			location.debris.Add(new Debris(debrisType, numberOfChunks / 4, debrisOrigin, debrisOrigin + new Vector2(-64f, 0f)));
+ 			numberOfChunks++;
+ 			location.debris.Add(new Debris(debrisType, numberOfChunks / 4, debrisOrigin, debrisOrigin + new Vector2(64f, 0f)));
+@@ -10421,6 +11082,19 @@ public class Game1 : InstanceGame
+ 		}
+ 		else
+ 		{
++			if (VitaPlatform.MinimalDebris && debrisType != 8)
++			{
++				if (numberOfChunks > 0)
++				{
++					location.debris.Add(new Debris(debrisType, 1, debrisOrigin, debrisOrigin + new Vector2(64f, 0f), groundLevel, color));
++				}
++				return;
++			}
++			if ((VitaPlatform.MinimalDebris || VitaPlatform.FewParticles) && debrisType != 8)
++			{
++				// Port: Vita option, half the purely cosmetic chunks (chunk type 8 is picked up: Debris.updateChunks).
++				numberOfChunks = Math.Max(1, numberOfChunks / 2);
++			}
+ 			location.debris.Add(new Debris(debrisType, numberOfChunks / 4, debrisOrigin, debrisOrigin + new Vector2(-64f, 0f), groundLevel, color));
+ 			numberOfChunks++;
+ 			location.debris.Add(new Debris(debrisType, numberOfChunks / 4, debrisOrigin, debrisOrigin + new Vector2(64f, 0f), groundLevel, color));
+@@ -10443,6 +11117,11 @@ public class Game1 : InstanceGame
+ 
+ 	public static void createRadialDebris(GameLocation location, string texture, Microsoft.Xna.Framework.Rectangle sourcerectangle, int sizeOfSourceRectSquares, int xPosition, int yPosition, int numberOfChunks, int groundLevelTile)
+ 	{
++		if (VitaPlatform.MinimalDebris || VitaPlatform.FewParticles)
++		{
++			// Port: Vita option, half the purely cosmetic chunks.
++			numberOfChunks = Math.Max(1, numberOfChunks / 2);
++		}
+ 		Vector2 debrisOrigin = new Vector2(xPosition, yPosition);
+ 		location.debris.Add(new Debris(texture, sourcerectangle, numberOfChunks / 4, debrisOrigin, debrisOrigin + new Vector2(-64f, 0f), groundLevelTile * 64, sizeOfSourceRectSquares));
+ 		location.debris.Add(new Debris(texture, sourcerectangle, numberOfChunks / 4, debrisOrigin, debrisOrigin + new Vector2(64f, 0f), groundLevelTile * 64, sizeOfSourceRectSquares));
+@@ -10452,6 +11131,11 @@ public class Game1 : InstanceGame
+ 
+ 	public static void createRadialDebris_MoreNatural(GameLocation location, string texture, Microsoft.Xna.Framework.Rectangle sourcerectangle, int sizeOfSourceRectSquares, int xPosition, int yPosition, int numberOfChunks, int groundLevel)
+ 	{
++		if (VitaPlatform.MinimalDebris || VitaPlatform.FewParticles)
++		{
++			// Port: Vita option, half the purely cosmetic chunks.
++			numberOfChunks = Math.Max(1, numberOfChunks / 2);
++		}
+ 		Vector2 debrisOrigin = new Vector2(xPosition, yPosition);
+ 		for (int i = 0; i < numberOfChunks; i++)
+ 		{
+@@ -10466,6 +11150,11 @@ public class Game1 : InstanceGame
+ 
+ 	public static void createRadialDebris(GameLocation location, string texture, Microsoft.Xna.Framework.Rectangle sourcerectangle, int sizeOfSourceRectSquares, int xPosition, int yPosition, int numberOfChunks, int groundLevelTile, Microsoft.Xna.Framework.Color color, float scale)
+ 	{
++		if (VitaPlatform.MinimalDebris || VitaPlatform.FewParticles)
++		{
++			// Port: Vita option, half the purely cosmetic chunks.
++			numberOfChunks = Math.Max(1, numberOfChunks / 2);
++		}
+ 		Vector2 debrisOrigin = new Vector2(xPosition, yPosition);
+ 		while (numberOfChunks > 0)
+ 		{
+@@ -10971,7 +11660,7 @@ public class Game1 : InstanceGame
+ 			{
+ 				if (player.ActiveObject.performUseAction(currentLocation))
+ 				{
+-					player.reduceActiveItemByOne();
++					if (!VitaTractorMod.IsKit(player.ActiveObject)) player.reduceActiveItemByOne();
+ 					oldKBState = currentKBState;
+ 					oldMouseState = input.GetMouseState();
+ 					oldPadState = currentPadState;
+@@ -11207,6 +11896,7 @@ public class Game1 : InstanceGame
+ 		{
+ 			return false;
+ 		}
++		VitaAutoActions.BeforeUseTool();
+ 		player.toolPower.Value = 0;
+ 		player.toolHold.Value = 0;
+ 		bool did_attempt_object_removal = false;
+@@ -11242,7 +11932,11 @@ public class Game1 : InstanceGame
+ 				}
+ 			}
+ 		}
+-		if (currentMinigame == null && !player.UsingTool && (player.IsSitting() || player.isRidingHorse() || player.onBridge.Value || dialogueUp || (eventUp && !CurrentEvent.canPlayerUseTool() && (!currentLocation.currentEvent.playerControlSequence || (activeClickableMenu == null && currentMinigame == null))) || (player.CurrentTool != null && object.Equals(true, currentLocation.doesPositionCollideWithCharacter(Utility.getRectangleCenteredAt(player.GetToolLocation(), 64), ignoreMonsters: true)?.IsVillager))))
++		if (player.isRidingHorse() && VitaTractorMod.IsTractor(player.mount))
++		{
++			return true;
++		}
++		if (currentMinigame == null && !player.UsingTool && (player.IsSitting() || (player.isRidingHorse() && !VitaTractorMod.IsTractor(player.mount)) || player.onBridge.Value || dialogueUp || (eventUp && !CurrentEvent.canPlayerUseTool() && (!currentLocation.currentEvent.playerControlSequence || (activeClickableMenu == null && currentMinigame == null))) || (player.CurrentTool != null && object.Equals(true, currentLocation.doesPositionCollideWithCharacter(Utility.getRectangleCenteredAt(player.GetToolLocation(), 64), ignoreMonsters: true)?.IsVillager))))
+ 		{
+ 			pressActionButton(GetKeyboardState(), input.GetMouseState(), input.GetGamePadState());
+ 			return false;
+@@ -11685,7 +12379,9 @@ public class Game1 : InstanceGame
+ 
+ 	public static bool isFestival()
+ 	{
+-		return object.Equals(true, currentLocation?.currentEvent?.isFestival);
++		// Port: the same answer without boxing a bool and a bool? on every call (every location's character update asks).
++		Event festivalEvent = currentLocation?.currentEvent;
++		return festivalEvent != null && festivalEvent.isFestival;
+ 	}
+ 
+ 	public bool parseDebugInput(string debugInput, IGameLogger log = null)
+@@ -11843,13 +12539,7 @@ public class Game1 : InstanceGame
+ 		{
+ 			panModeString += " (animation_name_here)";
+ 		}
+-		Thread thread = new Thread(() =>
+-		{
+-			Clipboard.SetText(panModeString);
+-		});
+-		thread.SetApartmentState(ApartmentState.STA);
+-		thread.Start();
+-		thread.Join();
++		DesktopClipboard.SetText(panModeString);
+ 		debugOutput = panModeString;
+ 	}
+ 
+@@ -12079,6 +12769,14 @@ public class Game1 : InstanceGame
+ 		return Utility.getHeldButtons(input.GetGamePadState()).Count > 0;
+ 	}
+ 
++	private static int _vitaChatOpenedTick = -1;
++	private static void VitaBeginChatKeyboard()
++	{
++		_vitaChatOpenedTick = ticks;
++		keyboardDispatcher.Subscriber = chatBox.chatBox;
++		KeyboardInput.SetTextInputActive(true);
++	}
++
+ 	private static void UpdateChatBox()
+ 	{
+ 		if (chatBox == null)
+@@ -12100,10 +12798,17 @@ public class Game1 : InstanceGame
+ 				{
+ 					oldPadState = padState;
+ 					oldKBState = keyState;
+-					showTextEntry(chatBox.chatBox);
++					if (VitaPlatform.IsVita)
++					{
++						VitaBeginChatKeyboard();
++					}
++					else
++					{
++						showTextEntry(chatBox.chatBox);
++					}
+ 				}
+ 			}
+-			if (keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Escape) || padState.IsButtonDown(Buttons.B) || padState.IsButtonDown(Buttons.Back))
++			if ((!VitaPlatform.IsVita || ticks != _vitaChatOpenedTick) && (keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Escape) || (padState.IsButtonDown(Buttons.B) && !oldPadState.IsButtonDown(Buttons.B)) || (padState.IsButtonDown(Buttons.Back) && !oldPadState.IsButtonDown(Buttons.Back)) || (padState.IsButtonDown(Buttons.Start) && !oldPadState.IsButtonDown(Buttons.Start))))
+ 			{
+ 				chatBox.clickAway();
+ 				oldKBState = keyState;
+@@ -13012,6 +13717,53 @@ public class Game1 : InstanceGame
+ 						if (options.gamepadControls && !flag5)
+ 						{
+ 							flag5 = currentPadState.IsButtonDown(Buttons.Back) && !oldPadState.IsButtonDown(Buttons.Back);
++							// Port: with L and R held, SELECT opens the test menu instead of the journal (a vita-debug file in the game folder).
++							// L and R reach the game as the triggers in play (InputState.MapVitaButtons).
++							if (flag5 && VitaPlatform.DebugMenu && (currentPadState.IsButtonDown(Buttons.LeftShoulder) || currentPadState.Triggers.Left > 0.5f) && (currentPadState.IsButtonDown(Buttons.RightShoulder) || currentPadState.Triggers.Right > 0.5f))
++							{
++								flag5 = false;
++								VitaDebugMenu.Open();
++							}
++							else if (flag5 && VitaPlatform.IsVita && (currentPadState.IsButtonDown(Buttons.LeftShoulder) || currentPadState.Triggers.Left > 0.5f) && !(currentPadState.IsButtonDown(Buttons.RightShoulder) || currentPadState.Triggers.Right > 0.5f))
++							{
++								flag5 = false;
++								if (textEntry != null || (chatBox != null && chatBox.isActive()))
++								{
++									closeTextEntry();
++									chatBox?.clickAway();
++								}
++								else
++								{
++									if (chatBox == null)
++									{
++										chatBox = new Menus.ChatBox();
++										onScreenMenus.Add(chatBox);
++									}
++									chatBox.activate();
++									if (VitaPlatform.IsVita)
++									{
++										VitaBeginChatKeyboard();
++									}
++									else
++									{
++										showTextEntry(chatBox.chatBox);
++									}
++								}
++							}
++							else if (flag5 && VitaPlatform.IsVita && (currentPadState.IsButtonDown(Buttons.RightShoulder) || currentPadState.Triggers.Right > 0.5f) && !(currentPadState.IsButtonDown(Buttons.LeftShoulder) || currentPadState.Triggers.Left > 0.5f))
++							{
++								flag5 = false;
++								if (emoteMenu != null)
++								{
++									emoteMenu.exitThisMenuNoSound();
++									emoteMenu = null;
++								}
++								else if (player.CanEmote())
++								{
++									emoteMenu = new Menus.EmoteMenu();
++									emoteMenu.gamepadMode = true;
++								}
++							}
+ 						}
+ 						if (options.gamepadControls && !flag6)
+ 						{
+@@ -13260,10 +14012,34 @@ public class Game1 : InstanceGame
+ 	{
+ 		isDrawing = true;
+ 		RenderTarget2D target_screen = null;
+-		if (ShouldDrawOnBuffer())
++		// Port: the world straight to the screen at the zooms that allow it (VitaDirectWorldScale).
++		float directScale = VitaDirectWorldScale();
++		xTile.Dimensions.Rectangle cameraBeforeDraw = viewport;
++		xTile.Dimensions.Rectangle cameraForDraw = viewport;
++		if (directScale > 0f)
++		{
++			viewport.X = VitaDirectCameraCoordinate(viewport.X, directScale);
++			viewport.Y = VitaDirectCameraCoordinate(viewport.Y, directScale);
++			cameraForDraw = viewport;
++			if (screen != null)
++			{
++				// Unused at this zoom: 8 MB of video memory at 67%.
++				screen = null;
++			}
++		}
++		else if (ShouldDrawOnBuffer())
+ 		{
+-			target_screen = screen;
++			if (currentMinigame == null)
++			{
++				if (screen == null)
++				{
++					// Not allocated while the camera was at a direct zoom (VitaAllocateScreen).
++					VitaAllocateScreen(true);
++				}
++				target_screen = screen;
++			}
+ 		}
++		GraphicsDevice.VitaBackBufferScale = directScale;
+ 		if (uiScreen != null)
+ 		{
+ 			SetRenderTarget(uiScreen);
+@@ -13273,9 +14049,33 @@ public class Game1 : InstanceGame
+ 		GameTime time = gameTime;
+ 		DebugTools.BeforeGameDraw(this, ref time);
+ 		_draw(time, target_screen);
++		if (directScale > 0f)
++		{
++			// The camera where the game had it, unless drawing moved it; then real back buffer pixels for the UI composite.
++			if (viewport.X == cameraForDraw.X && viewport.Y == cameraForDraw.Y)
++			{
++				viewport.X = cameraBeforeDraw.X;
++				viewport.Y = cameraBeforeDraw.Y;
++			}
++			SetRenderTarget(null);
++		}
++		GraphicsDevice.VitaBackBufferScale = 0f;
+ 		isRenderingScreenBuffer = true;
+ 		renderScreenBuffer(target_screen);
+ 		isRenderingScreenBuffer = false;
++		if (VitaPlatform.IsVita && VitaPlatform.ScreenshotRequested)
++		{
++			// A few frames after the menu that asked for it closes (was 2 s), so the picture shows the world without the menu.
++			if (activeClickableMenu != null)
++			{
++				vitaScreenshotDelay = 4;
++			}
++			else if (--vitaScreenshotDelay <= 0)
++			{
++				VitaPlatform.ScreenshotRequested = false;
++				TakeVitaScreenshot();
++			}
++		}
+ 		if (uiModeCount != 0)
+ 		{
+ 			log.Warn("WARNING: Mismatched UI Mode Push/Pop counts. Correcting.");
+@@ -13292,6 +14092,192 @@ public class Game1 : InstanceGame
+ 		isDrawing = false;
+ 	}
+ 
++	/// <summary>Port: frames left before a requested screenshot is taken (<see cref="F:StardewValley.VitaPlatform.ScreenshotRequested" />).</summary>
++	private int vitaScreenshotDelay;
++
++	/// <summary>Port: saves the frame just presented (one screen, 960x544) to Screenshots/ without the map-sized buffers of takeMapScreenshot. Only the back buffer copy (~2 MB) is held, dropped on return; the PNG is written through a ~64 KB block buffer.</summary>
++	private void TakeVitaScreenshot()
++	{
++		string filename = null;
++		string fullFilePath = null;
++		try
++		{
++			int w = GraphicsDevice.PresentationParameters.BackBufferWidth;
++			int h = GraphicsDevice.PresentationParameters.BackBufferHeight;
++			Microsoft.Xna.Framework.Color[] colors = new Microsoft.Xna.Framework.Color[w * h];
++			GraphicsDevice.GetBackBufferData(colors);
++			DateTime now = DateTime.UtcNow;
++			string who = (player != null && player.name.Value != null) ? SaveGame.FilterFileName(player.name.Value) : "Vita";
++			filename = who + $"_{now.Month}-{now.Day}-{now.Year}_{(int)now.TimeOfDay.TotalMilliseconds}.png";
++			fullFilePath = Path.Combine(GetScreenshotFolder(), filename);
++			using (FileStream png_file = File.Create(fullFilePath))
++			{
++				// PngStreamWriter compresses through DeflateStream, whose native half (MonoPosixHelper) the Vita doesn't have.
++				WriteStoredPng(png_file, w, h, colors);
++			}
++			colors = null;
++			addHUDMessage(new HUDMessage(filename, 6));
++			// The camera flash after the capture, so it isn't in the picture.
++			flashAlpha = 1f;
++		}
++		catch (Exception exception)
++		{
++			log.Error("Vita screenshot failed.", exception);
++			try
++			{
++				if (fullFilePath != null)
++				{
++					File.Delete(fullFilePath);
++				}
++			}
++			catch (Exception)
++			{
++			}
++		}
++	}
++
++	/// <summary>Port: CRC32 of <paramref name="count" /> bytes, continuing <paramref name="crc" /> (pre-inverted), with the table lookup in a tight loop over locals.</summary>
++	private static uint VitaCrc32(uint[] table, uint crc, byte[] data, int offset, int count)
++	{
++		int end = offset + count;
++		for (int i = offset; i < end; i++)
++		{
++			crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
++		}
++		return crc;
++	}
++
++	/// <summary>Port: Adler32 update with the modulo taken once per 5552 bytes (zlib's NMAX, the most that can't overflow) instead of per byte: the Vita's CPU divides in software.</summary>
++	private static void VitaAdler32(ref uint adlerA, ref uint adlerB, byte[] data, int offset, int count)
++	{
++		uint a = adlerA;
++		uint b = adlerB;
++		while (count > 0)
++		{
++			int n = (count < 5552) ? count : 5552;
++			int end = offset + n;
++			for (int i = offset; i < end; i++)
++			{
++				a += data[i];
++				b += a;
++			}
++			a %= 65521u;
++			b %= 65521u;
++			offset = end;
++			count -= n;
++		}
++		adlerA = a;
++		adlerB = b;
++	}
++
++	/// <summary>Port: writes the back buffer as an RGB PNG without compression (zlib "stored" blocks), so it needs no native zlib; 960x544 comes to ~1.5 MB. Converts row by row straight into one ~64 KB block buffer that is checksummed and written in a single call per block (24 writes instead of thousands of small ones); no RGB copy of the whole image.</summary>
++	private static void WriteStoredPng(Stream output, int width, int height, Microsoft.Xna.Framework.Color[] colors)
++	{
++		uint[] crcTable = new uint[256];
++		for (uint n = 0; n < 256; n++)
++		{
++			uint c = n;
++			for (int k = 0; k < 8; k++)
++			{
++				c = ((c & 1) != 0) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
++			}
++			crcTable[n] = c;
++		}
++		byte[] small = new byte[13];
++		// Signature.
++		small[0] = 137; small[1] = 80; small[2] = 78; small[3] = 71; small[4] = 13; small[5] = 10; small[6] = 26; small[7] = 10;
++		output.Write(small, 0, 8);
++		// IHDR: length 13, "IHDR", width, height, 8 bits, RGB, deflate, no filter extras, no interlace.
++		byte[] ihdr = new byte[21];
++		ihdr[0] = 0; ihdr[1] = 0; ihdr[2] = 0; ihdr[3] = 13;
++		ihdr[4] = (byte)'I'; ihdr[5] = (byte)'H'; ihdr[6] = (byte)'D'; ihdr[7] = (byte)'R';
++		ihdr[8] = (byte)(width >> 24); ihdr[9] = (byte)(width >> 16); ihdr[10] = (byte)(width >> 8); ihdr[11] = (byte)width;
++		ihdr[12] = (byte)(height >> 24); ihdr[13] = (byte)(height >> 16); ihdr[14] = (byte)(height >> 8); ihdr[15] = (byte)height;
++		ihdr[16] = 8; ihdr[17] = 2; ihdr[18] = 0; ihdr[19] = 0; ihdr[20] = 0;
++		output.Write(ihdr, 0, 21);
++		uint crc = VitaCrc32(crcTable, 0xFFFFFFFFu, ihdr, 4, 17) ^ 0xFFFFFFFFu;
++		small[0] = (byte)(crc >> 24); small[1] = (byte)(crc >> 16); small[2] = (byte)(crc >> 8); small[3] = (byte)crc;
++		output.Write(small, 0, 4);
++
++		int rowBytes = width * 3;
++		int raw = height * (rowBytes + 1);
++		int blocks = (raw + 65534) / 65535;
++		uint idatLength = (uint)(2 + raw + blocks * 5 + 4);
++		// IDAT length, "IDAT", zlib header (CM 8, 32K window, no compression).
++		small[0] = (byte)(idatLength >> 24); small[1] = (byte)(idatLength >> 16); small[2] = (byte)(idatLength >> 8); small[3] = (byte)idatLength;
++		small[4] = (byte)'I'; small[5] = (byte)'D'; small[6] = (byte)'A'; small[7] = (byte)'T';
++		small[8] = 0x78; small[9] = 0x01;
++		output.Write(small, 0, 10);
++		crc = VitaCrc32(crcTable, 0xFFFFFFFFu, small, 4, 6);
++
++		uint adlerA = 1;
++		uint adlerB = 0;
++		// One row of the raw stream: filter byte 0, then the RGB pixels.
++		byte[] row = new byte[rowBytes + 1];
++		int rowPos = row.Length;
++		int nextY = 0;
++		// One stored block: 5 header bytes, then up to 65535 data bytes.
++		byte[] blk = new byte[5 + 65535];
++		int written = 0;
++		while (written < raw)
++		{
++			int blockLen = raw - written;
++			if (blockLen > 65535)
++			{
++				blockLen = 65535;
++			}
++			blk[0] = (byte)((written + blockLen >= raw) ? 1 : 0);
++			blk[1] = (byte)blockLen;
++			blk[2] = (byte)(blockLen >> 8);
++			blk[3] = (byte)~blockLen;
++			blk[4] = (byte)(~blockLen >> 8);
++			int fill = 0;
++			while (fill < blockLen)
++			{
++				if (rowPos == row.Length)
++				{
++					// Next row: convert straight from the Color[] (R, G, B bytes).
++					int src = nextY * width;
++					int dst = 1;
++					row[0] = 0;
++					for (int x = 0; x < width; x++)
++					{
++						Microsoft.Xna.Framework.Color px = colors[src + x];
++						row[dst] = px.R;
++						row[dst + 1] = px.G;
++						row[dst + 2] = px.B;
++						dst += 3;
++					}
++					nextY++;
++					rowPos = 0;
++				}
++				int take = row.Length - rowPos;
++				if (take > blockLen - fill)
++				{
++					take = blockLen - fill;
++				}
++				Buffer.BlockCopy(row, rowPos, blk, 5 + fill, take);
++				rowPos += take;
++				fill += take;
++			}
++			VitaAdler32(ref adlerA, ref adlerB, blk, 5, blockLen);
++			crc = VitaCrc32(crcTable, crc, blk, 0, 5 + blockLen);
++			output.Write(blk, 0, 5 + blockLen);
++			written += blockLen;
++		}
++		// Adler32 of the raw stream ends the zlib data, inside the IDAT checksum; the chunk CRC follows it.
++		small[0] = (byte)(adlerB >> 8); small[1] = (byte)adlerB; small[2] = (byte)(adlerA >> 8); small[3] = (byte)adlerA;
++		crc = VitaCrc32(crcTable, crc, small, 0, 4) ^ 0xFFFFFFFFu;
++		small[4] = (byte)(crc >> 24); small[5] = (byte)(crc >> 16); small[6] = (byte)(crc >> 8); small[7] = (byte)crc;
++		output.Write(small, 0, 8);
++		// IEND: length 0, "IEND", CRC.
++		small[0] = 0; small[1] = 0; small[2] = 0; small[3] = 0;
++		small[4] = (byte)'I'; small[5] = (byte)'E'; small[6] = (byte)'N'; small[7] = (byte)'D';
++		crc = VitaCrc32(crcTable, 0xFFFFFFFFu, small, 4, 4) ^ 0xFFFFFFFFu;
++		small[8] = (byte)(crc >> 24); small[9] = (byte)(crc >> 16); small[10] = (byte)(crc >> 8); small[11] = (byte)crc;
++		output.Write(small, 0, 12);
++	}
++
+ 	public virtual bool ShouldDrawOnBuffer()
+ 	{
+ 		if (LocalMultiplayer.IsLocalMultiplayer())
+@@ -13300,11 +14286,52 @@ public class Game1 : InstanceGame
+ 		}
+ 		if (options.zoomLevel != 1f)
+ 		{
+-			return true;
++			// Port: not at the zooms the world is drawn straight to the screen at.
++			return VitaDirectWorldScale() == 0f;
+ 		}
+ 		return false;
+ 	}
+ 
++	/// <summary>
++	/// Port: the zoom the world is drawn straight to the screen at, through FNA's virtual back buffer
++	/// (<see cref="P:Microsoft.Xna.Framework.Graphics.GraphicsDevice.VitaBackBufferScale" />), or 0 when it goes through <see cref="P:StardewValley.Game1.screen" />.
++	/// </summary>
++	/// <remarks>
++	/// Below zoom 1 the game draws the world into a render target 1/zoom the size of the screen and scales it down: at the 67% camera 1920x1088 pixels a frame, then the copy; the Vita's GPU spent ~15 ms of every frame there. At zoom 0.5 (67%) and 0.75 (100%) an art pixel is a whole number of screen pixels (2 and 3), so the same drawing straight to the screen with nearest-texel sampling puts every art pixel on whole screen pixels, as 133% does; the GPU fills a quarter (half) of the pixels and the copy is gone. The other zooms put art pixels on 2.625 and 3.5 screen pixels and keep the buffer, whose linear scaling evens them out.
++	/// Only in play and on the title screen (loading and minigames as before), alone on the screen, and not with a file named vita-buffered-camera in the game folder (to compare).
++	/// </remarks>
++	internal static float VitaDirectWorldScale()
++	{
++		// The title screen too: its menu draws into uiScreen and the world buffer stayed empty, yet it was
++		// cleared and scaled onto the screen every frame (the title ran at 48 fps, GPU-bound).
++		if (!VitaPlatform.IsVita || VitaPlatform.BufferedCamera || options == null || (gameMode != playingGameMode && gameMode != titleScreenGameMode) || currentMinigame != null || game1 == null || game1.takingMapScreenshot || LocalMultiplayer.IsLocalMultiplayer())
++		{
++			return 0f;
++		}
++		float zoom = options.zoomLevel;
++		if (Math.Abs(zoom - 0.5f) < 0.0001f)
++		{
++			return 0.5f;
++		}
++		if (Math.Abs(zoom - 0.75f) < 0.0001f)
++		{
++			return 0.75f;
++		}
++		return 0f;
++	}
++
++	/// <summary>
++	/// Port: the camera position the world is drawn from at a direct zoom (<see cref="VitaDirectWorldScale" />). A tile's texels then start <c>(viewport * zoom)</c>'s fraction of a pixel off whole screen pixels for every tile alike; at half a pixel each texel edge falls on a pixel center and rounding would pick the neighbouring texel for some, which shows as lines. One world pixel away it doesn't: at zoom 0.5 an even position (whole screen pixels, so the camera still moves pixel by pixel), at 0.75 anything but 2 past a multiple of 4.
++	/// </summary>
++	private static int VitaDirectCameraCoordinate(int value, float scale)
++	{
++		if (scale == 0.5f)
++		{
++			return value & ~1;
++		}
++		return ((value & 3) == 2) ? (value - 1) : value;
++	}
++
+ 	public static bool ShouldShowOnscreenUsernames()
+ 	{
+ 		return false;
+@@ -13421,7 +14448,9 @@ public class Game1 : InstanceGame
+ 			}
+ 			if (draw_world)
+ 			{
++				double sectionStart = VitaPlatform.BeginSection();
+ 				DrawWorld(gameTime, target_screen);
++				VitaPlatform.EndSection("draw world", sectionStart);
+ 				PushUIMode();
+ 				spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+ 				if (hooks.OnRendering(RenderSteps.HUD, spriteBatch, gameTime, target_screen))
+@@ -13429,6 +14458,7 @@ public class Game1 : InstanceGame
+ 					if (IsHudDrawn)
+ 					{
+ 						drawHUD();
++						VitaQoLOverlay.DrawHud(spriteBatch, gameTime);
+ 					}
+ 					if (hudMessages.Count > 0 && !takingMapScreenshot)
+ 					{
+@@ -13490,23 +14520,150 @@ public class Game1 : InstanceGame
+ 		debugTimings.StopDrawTimer();
+ 	}
+ 
+-	public virtual void DrawLoadScreen(GameTime time, RenderTarget2D target_screen)
+-	{
+-		PushUIMode();
+-		GraphicsDevice.Clear(bgColor);
+-		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+-		string addOn = "".PadRight((int)Math.Ceiling(time.TotalGameTime.TotalMilliseconds % 999.0 / 333.0), '.');
+-		string text = content.LoadString("Strings\\StringsFromCSFiles:Game1.cs.3688");
+-		string msg = text + addOn;
+-		string largestMessage = text + "... ";
+-		int msgw = SpriteText.getWidthOfString(largestMessage);
+-		int msgh = 64;
+-		int msgx = 64;
+-		int msgy = graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Bottom - msgh;
+-		SpriteText.drawString(spriteBatch, msg, msgx, msgy, 999999, msgw, msgh, 1f, 0.88f, junimoText: false, 0, largestMessage);
+-		spriteBatch.End();
+-		PopUIMode();
+-	}
++	/// <summary>Port: the controls diagram on the loading screen (vita-controls.png in the game folder, our own drawing from vita-builder/tools/controls-art, 640x340, drawn 1:1 on screen); null until first drawn, or if the file is missing.</summary>
++	private static Texture2D vitaControlsImage;
++
++	private static bool vitaControlsImageTried;
++
++	/// <summary>Port: the Vita's loading screen: the controls diagram and "Loading" with dots that count by real time (game time stands still while a load step runs).</summary>
++	private void DrawVitaLoadingContents(SpriteBatch b, int uiWidth, int uiHeight)
++	{
++		if (!vitaControlsImageTried)
++		{
++			vitaControlsImageTried = true;
++			try
++			{
++				if (File.Exists("vita-controls.png"))
++				{
++					using FileStream stream = File.OpenRead("vita-controls.png");
++					vitaControlsImage = Texture2D.FromStream(GraphicsDevice, stream);
++				}
++			}
++			catch (Exception exception)
++			{
++				log.Error("Vita controls image not loaded.", exception);
++			}
++		}
++		if (vitaControlsImage != null)
++		{
++			// One texel per screen pixel; the top a quarter of the way down, as in the official release.
++			float scale = 1f / options.uiScale;
++			Vector2 position = new Vector2((int)((uiWidth - vitaControlsImage.Width * scale) / 2f), (int)(uiHeight * 0.235f));
++			b.Draw(vitaControlsImage, position, null, Microsoft.Xna.Framework.Color.White, 0f, Vector2.Zero, scale, SpriteEffects.None, 0.5f);
++		}
++		long ms = Stopwatch.GetTimestamp() / (Stopwatch.Frequency / 1000);
++		string addOn = "".PadRight((int)Math.Ceiling(ms % 999 / 333.0), '.');
++		string text = content.LoadString("Strings\\StringsFromCSFiles:Game1.cs.3688");
++		string largestMessage = text + "... ";
++		int msgw = SpriteText.getWidthOfString(largestMessage);
++		int msgh = 64;
++		SpriteText.drawString(b, text + addOn, 64, uiHeight - msgh, 999999, msgw, msgh, 1f, 0.88f, junimoText: false, 0, largestMessage);
++	}
++
++	private static long vitaLoadPumpNext;
++
++	private static bool vitaLoadPumping;
++
++	/// <summary>Port: draws and presents the loading screen from inside a long load step, at most three times a second (each one moves the dots on).</summary>
++	/// <remarks>
++	/// The load steps run on the main thread on the Vita (Mono's cooperative GC suspend failed with them on a
++	/// pool thread, see ModHooks.StartOrRun), and one step can take seconds, so the screen and its dots stood
++	/// still. Content loads, save reading and schedule pathfinding call this; it does nothing outside the
++	/// loading mode, while a frame is being drawn, or when called again from its own drawing. Each call costs a
++	/// draw and a present (up to a vsync wait), about 3% of the load time.
++	/// </remarks>
++	public static void PumpVitaLoadingScreen()
++	{
++		if (!VitaPlatform.IsVita || gameMode != loadingMode || vitaLoadPumping || game1 == null || game1.isDrawing)
++		{
++			return;
++		}
++		long now = Stopwatch.GetTimestamp();
++		if (now < vitaLoadPumpNext)
++		{
++			return;
++		}
++		vitaLoadPumpNext = now + Stopwatch.Frequency / 3;
++		vitaLoadPumping = true;
++		try
++		{
++			GraphicsDevice device = game1.GraphicsDevice;
++			RenderTarget2D ui = game1.uiScreen;
++			if (ui != null && !ui.IsDisposed)
++			{
++				// The same way as the game's own loading frames: the UI buffer, then scaled onto the screen with linear
++				// filtering. Drawn straight to the screen with point filtering, the text's pixels came out 2 or 4 screen
++				// pixels wide and looked different from the frames in between: the "Loading" text seemed to flicker.
++				device.SetRenderTarget(ui);
++				device.Clear(Microsoft.Xna.Framework.Color.Transparent);
++				spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
++				try
++				{
++					game1.DrawVitaLoadingContents(spriteBatch, ui.Width, ui.Height);
++				}
++				finally
++				{
++					spriteBatch.End();
++				}
++				device.SetRenderTarget(null);
++				device.Clear(bgColor);
++				spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.Default, RasterizerState.CullNone);
++				spriteBatch.Draw(ui, Vector2.Zero, ui.Bounds, Microsoft.Xna.Framework.Color.White, 0f, Vector2.Zero, options.uiScale, SpriteEffects.None, 1f);
++				spriteBatch.End();
++			}
++			else
++			{
++				device.SetRenderTarget(null);
++				device.Clear(bgColor);
++				spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null, null, Microsoft.Xna.Framework.Matrix.CreateScale(options.uiScale));
++				try
++				{
++					game1.DrawVitaLoadingContents(spriteBatch, (int)Math.Ceiling(device.PresentationParameters.BackBufferWidth / options.uiScale), (int)Math.Ceiling(device.PresentationParameters.BackBufferHeight / options.uiScale));
++				}
++				finally
++				{
++					spriteBatch.End();
++				}
++			}
++			device.Present();
++		}
++		catch (Exception exception)
++		{
++			log.Warn("Vita loading screen not drawn: " + exception.Message);
++		}
++		finally
++		{
++			vitaLoadPumping = false;
++		}
++	}
++
++	public virtual void DrawLoadScreen(GameTime time, RenderTarget2D target_screen)
++	{
++		if (VitaPlatform.IsVita)
++		{
++			PushUIMode();
++			GraphicsDevice.Clear(bgColor);
++			spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
++			DrawVitaLoadingContents(spriteBatch, uiViewport.Width, graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Bottom);
++			spriteBatch.End();
++			PopUIMode();
++			return;
++		}
++		PushUIMode();
++		GraphicsDevice.Clear(bgColor);
++		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
++		string addOn = "".PadRight((int)Math.Ceiling(time.TotalGameTime.TotalMilliseconds % 999.0 / 333.0), '.');
++		string text = content.LoadString("Strings\\StringsFromCSFiles:Game1.cs.3688");
++		string msg = text + addOn;
++		string largestMessage = text + "... ";
++		int msgw = SpriteText.getWidthOfString(largestMessage);
++		int msgh = 64;
++		int msgx = 64;
++		int msgy = graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Bottom - msgh;
++		SpriteText.drawString(spriteBatch, msg, msgx, msgy, 999999, msgw, msgh, 1f, 0.88f, junimoText: false, 0, largestMessage);
++		spriteBatch.End();
++		PopUIMode();
++	}
+ 
+ 	public virtual void DrawMenu(GameTime time, RenderTarget2D target_screen)
+ 	{
+@@ -13559,6 +14716,15 @@ public class Game1 : InstanceGame
+ 			{
+ 				DrawLighting(time, target_screen);
+ 			}
++			bool backLayersCached = VitaPrepareBackLayerCache(target_screen);
++			bool floorCached = VitaPrepareFloorCache(target_screen);
++			bool soilCached = VitaPrepareSoilCache(target_screen);
++			if (VitaPlatform.IsVita)
++			{
++				VitaPlatform.CachedFrames[0] += backLayersCached ? 1 : 0;
++				VitaPlatform.CachedFrames[1] += floorCached ? 1 : 0;
++				VitaPlatform.CachedFrames[2] += soilCached ? 1 : 0;
++			}
+ 			GraphicsDevice.Clear(bgColor);
+ 			spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+ 			if (hooks.OnRendering(RenderSteps.World_Background, spriteBatch, time, target_screen))
+@@ -13566,18 +14732,41 @@ public class Game1 : InstanceGame
+ 				background?.draw(spriteBatch);
+ 				currentLocation.drawBackground(spriteBatch);
+ 				spriteBatch.End();
+-				for (int i = 0; i < currentLocation.backgroundLayers.Count; i++)
++				if (backLayersCached)
+ 				{
+-					spriteBatch.Begin(SpriteSortMode.Texture, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+-					currentLocation.backgroundLayers[i].Key.Draw(mapDisplayDevice, viewport, Location.Origin, wrapAround: false, 4, -1f);
+-					spriteBatch.End();
++					VitaDrawBackLayerCache();
++				}
++				else
++				{
++					for (int i = 0; i < currentLocation.backgroundLayers.Count; i++)
++					{
++						spriteBatch.Begin(SpriteSortMode.Texture, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
++						currentLocation.backgroundLayers[i].Key.Draw(mapDisplayDevice, viewport, Location.Origin, wrapAround: false, 4, -1f);
++						spriteBatch.End();
++					}
+ 				}
+ 				spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+ 				currentLocation.drawWater(spriteBatch);
+ 				spriteBatch.End();
+ 				spriteBatch.Begin(SpriteSortMode.FrontToBack, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+-				currentLocation.drawFloorDecorations(spriteBatch);
++				if (floorCached)
++				{
++					// The building backgrounds and rugs live; the paths and floors over them from the cache.
++					GameLocation.VitaFloorPass = 2;
++				}
++				try
++				{
++					currentLocation.drawFloorDecorations(spriteBatch);
++				}
++				finally
++				{
++					GameLocation.VitaFloorPass = 0;
++				}
+ 				spriteBatch.End();
++				if (floorCached)
++				{
++					VitaDrawGroundCache(_vitaFloorCache);
++				}
+ 			}
+ 			hooks.OnRendered(RenderSteps.World_Background, spriteBatch, time, target_screen);
+ 			spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+@@ -13644,6 +14833,12 @@ public class Game1 : InstanceGame
+ 			}
+ 			Layer building_layer = currentLocation.Map.RequireLayer("Buildings");
+ 			spriteBatch.End();
++			if (soilCached)
++			{
++				// The tilled soil, where the sorted batch would have drawn it first (VitaPrepareGroundCache).
++				VitaDrawGroundCache(_vitaSoilCache);
++			}
++			GameLocation.VitaSoilFromCache = soilCached;
+ 			spriteBatch.Begin(SpriteSortMode.FrontToBack, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
+ 			if (hooks.OnRendering(RenderSteps.World_Sorted, spriteBatch, time, target_screen))
+ 			{
+@@ -13717,6 +14912,7 @@ public class Game1 : InstanceGame
+ 			}
+ 			hooks.OnRendered(RenderSteps.World_Sorted, spriteBatch, time, target_screen);
+ 			spriteBatch.End();
++			GameLocation.VitaSoilFromCache = false;
+ 			if (hooks.OnRendering(RenderSteps.World_AlwaysFront, spriteBatch, time, target_screen))
+ 			{
+ 				for (int l = 0; l < currentLocation.alwaysFrontLayers.Count; l++)
+@@ -13822,6 +15018,408 @@ public class Game1 : InstanceGame
+ 		hooks.OnRendered(RenderSteps.World, spriteBatch, time, target_screen);
+ 	}
+ 
++	/// <summary>Port: the back layers drawn into one picture that the following frames reuse (see <see cref="VitaPrepareBackLayerCache" />).</summary>
++	private static RenderTarget2D _vitaBackCache;
++
++	private static GameLocation _vitaBackCacheLocation;
++
++	private static xTile.Map _vitaBackCacheMap;
++
++	private static int _vitaBackCacheX;
++
++	private static int _vitaBackCacheY;
++
++	private static int _vitaBackCacheColumns;
++
++	private static int _vitaBackCacheRows;
++
++	/// <summary>Port: the visible columns and rows the back layer cache was drawn for, and the tiles it has around them on each side (<see cref="VitaCacheMargin" />).</summary>
++	private static int _vitaBackCacheViewColumns;
++
++	private static int _vitaBackCacheViewRows;
++
++	private static int _vitaBackCacheMargin;
++
++	/// <summary>Port: tiles the cached pictures (back layers, floors, soil) hold beyond the visible ones on each side.</summary>
++	/// <remarks>A picture of the visible tiles only was redrawn each time the camera crossed a tile: on a walk at the far camera,
++	/// four or five times a second for each picture (82 redraws in 10 s on a paved farm against 5 standing). With one tile
++	/// around it the camera moves two tiles before it is redrawn. A third of a megabyte more per picture at the far camera;
++	/// without that room in vitaGL a picture is drawn without the margin.</remarks>
++	private const int VitaCacheMargin = 1;
++
++	/// <summary>Port: whether a cached picture with its corner at tile (<paramref name="cacheX" />, <paramref name="cacheY" />), drawn
++	/// for a view of <paramref name="viewColumns" /> by <paramref name="viewRows" /> tiles with <paramref name="margin" /> tiles around
++	/// it, covers the view at (<paramref name="x0" />, <paramref name="y0" />) of <paramref name="columns" /> by <paramref name="rows" /> tiles.</summary>
++	private static bool VitaCacheCovers(int cacheX, int cacheY, int viewColumns, int viewRows, int margin, int x0, int y0, int columns, int rows)
++	{
++		return viewColumns == columns && viewRows == rows && x0 >= cacheX && y0 >= cacheY && x0 + columns <= cacheX + viewColumns + 2 * margin && y0 + rows <= cacheY + viewRows + 2 * margin;
++	}
++
++	private static float _vitaBackCacheScale;
++
++	private static Microsoft.Xna.Framework.Color _vitaBackCacheColor;
++
++	private static int _vitaBackCacheEdits;
++
++	private static long _vitaBackCacheMapTime;
++
++	private static long _vitaBackCacheNextAnimation;
++
++	private static int _vitaBackCacheFrame;
++
++	private static int _vitaBackCacheRenderedFrame;
++
++	private static int _vitaBackCacheWindowStart;
++
++	private static int _vitaBackCacheWindowRenders;
++
++	private static int _vitaBackCacheOffUntil;
++
++	/// <summary>Port: on the Vita, readies a picture of the current location's back layers for <see cref="VitaDrawBackLayerCache" />, redrawing it only when it is stale; false to draw the layers tile by tile as before.</summary>
++	/// <remarks>
++	/// The back layers are drawn first, each in its own batch, under everything but the background, so drawing them once into
++	/// a render target and that target onto the world gives the same picture: the cache is cleared to transparent, its tiles
++	/// are drawn in the same order with the same blending on the same pixel grid as the world target (at 67% the screen's
++	/// pixels, half a world pixel each; at the buffered zooms and at 133% world pixels), and it is drawn back 1:1. At 100%
++	/// (0.75 screen pixels per world pixel, tiles 48 pixels) the offset is a quarter pixel off whole for some camera positions
++	/// (never half: VitaDirectCameraCoordinate); SpriteBatch puts the picture on the nearest whole pixel as it does each tile,
++	/// so every pixel still shows the texel the tile path showed. It covers the visible tiles plus one column and row, and is redrawn when the camera crosses a tile, when an
++	/// animated tile it shows changes frame, when any tile or tile sheet changes (xTile.Layers.Layer.VitaTileEdits), on a new
++	/// location, size or colour, and at least every 2 seconds. Where tiles animate so fast that it is redrawn most frames, the
++	/// tile path comes back for 5 seconds. At 67% it saves ~600 sprites a frame, 2 in 3 of all the sprites drawn.
++	/// </remarks>
++	private bool VitaPrepareBackLayerCache(RenderTarget2D target_screen)
++	{
++		_vitaBackCacheFrame++;
++		if (!VitaPlatform.IsVita || VitaPlatform.TileBackLayers || VitaDebugMenu.NoCachedPictures || takingMapScreenshot || LocalMultiplayer.IsLocalMultiplayer() || currentLocation == null || currentLocation.Map == null || currentLocation.backgroundLayers.Count == 0 || !(mapDisplayDevice is LowRamDisplayDevice) || _vitaBackCacheFrame < _vitaBackCacheOffUntil)
++		{
++			return false;
++		}
++		float directScale = GraphicsDevice.VitaBackBufferScale;
++		float scale;
++		if (directScale == 0.5f || directScale == 0.75f)
++		{
++			scale = directScale;
++		}
++		else if (directScale > 0f)
++		{
++			return false;
++		}
++		else if (target_screen != null || Math.Abs(options.zoomLevel - 1f) < 0.0001f)
++		{
++			scale = 1f;
++		}
++		else
++		{
++			return false;
++		}
++		for (int i = 0; i < currentLocation.backgroundLayers.Count; i++)
++		{
++			if (currentLocation.backgroundLayers[i].Key.VitaHasDrawHandlers)
++			{
++				return false;
++			}
++		}
++		int x0 = (int)Math.Floor(viewport.X / 64.0);
++		int y0 = (int)Math.Floor(viewport.Y / 64.0);
++		int columns = 2 + (viewport.Width - 1) / 64;
++		int rows = 2 + (viewport.Height - 1) / 64;
++		xTile.Map map = currentLocation.Map;
++		long mapTime = map.ElapsedTime;
++		Microsoft.Xna.Framework.Color color = ((XnaDisplayDevice)mapDisplayDevice).ModulationColour;
++		if (_vitaBackCache != null && !_vitaBackCache.IsDisposed && !_vitaBackCache.IsContentLost && _vitaBackCacheLocation == currentLocation && _vitaBackCacheMap == map && VitaCacheCovers(_vitaBackCacheX, _vitaBackCacheY, _vitaBackCacheViewColumns, _vitaBackCacheViewRows, _vitaBackCacheMargin, x0, y0, columns, rows) && _vitaBackCacheScale == scale && _vitaBackCacheColor == color && _vitaBackCacheEdits == xTile.Layers.Layer.VitaTileEdits && mapTime >= _vitaBackCacheMapTime && mapTime < _vitaBackCacheNextAnimation && _vitaBackCacheFrame - _vitaBackCacheRenderedFrame < 120)
++		{
++			return true;
++		}
++		if (_vitaBackCacheFrame - _vitaBackCacheWindowStart >= 60)
++		{
++			bool churning = _vitaBackCacheWindowRenders > 30;
++			_vitaBackCacheWindowStart = _vitaBackCacheFrame;
++			_vitaBackCacheWindowRenders = 0;
++			if (churning)
++			{
++				_vitaBackCacheOffUntil = _vitaBackCacheFrame + 300;
++				return false;
++			}
++		}
++		int margin = VitaCacheMargin;
++		int width = (int)((columns + 2 * margin) * 64 * scale);
++		int height = (int)((rows + 2 * margin) * 64 * scale);
++		if (width * height > 2000000)
++		{
++			// 67% through the screen buffer (vita-buffered-camera) would need 10 MB.
++			return false;
++		}
++		if ((_vitaBackCache == null || _vitaBackCache.IsDisposed || _vitaBackCache.Width != width || _vitaBackCache.Height != height) && !VitaRoomForPicture(width, height, _vitaBackCache))
++		{
++			// No room for the margin: the picture of the visible tiles alone, as before.
++			margin = 0;
++			width = (int)(columns * 64 * scale);
++			height = (int)(rows * 64 * scale);
++		}
++		if (_vitaBackCache == null || _vitaBackCache.IsDisposed || _vitaBackCache.Width != width || _vitaBackCache.Height != height)
++		{
++			if (!VitaRoomForPicture(width, height, _vitaBackCache))
++			{
++				return false;
++			}
++			_vitaBackCache?.Dispose();
++			_vitaBackCache = new RenderTarget2D(graphics.GraphicsDevice, width, height, mipMap: false, SurfaceFormat.Color, DepthFormat.None, 0, RenderTargetUsage.PreserveContents)
++			{
++				Name = "@Game1.vitaBackCache"
++			};
++		}
++		SetRenderTarget(_vitaBackCache);
++		GraphicsDevice.Clear(Microsoft.Xna.Framework.Color.Transparent);
++		xTile.Dimensions.Rectangle cacheView = new xTile.Dimensions.Rectangle((x0 - margin) * 64, (y0 - margin) * 64, (columns + 2 * margin) * 64, (rows + 2 * margin) * 64);
++		Matrix toCache = Matrix.CreateScale(scale, scale, 1f);
++		LowRamDisplayDevice.VitaNextAnimationChange = long.MaxValue;
++		LowRamDisplayDevice.VitaRecordingAnimation = true;
++		try
++		{
++			for (int i = 0; i < currentLocation.backgroundLayers.Count; i++)
++			{
++				spriteBatch.Begin(SpriteSortMode.Texture, BlendState.AlphaBlend, SamplerState.PointClamp, null, null, null, toCache);
++				currentLocation.backgroundLayers[i].Key.Draw(mapDisplayDevice, cacheView, Location.Origin, wrapAround: false, 4, -1f);
++				spriteBatch.End();
++			}
++		}
++		finally
++		{
++			LowRamDisplayDevice.VitaRecordingAnimation = false;
++			SetRenderTarget(target_screen);
++		}
++		_vitaBackCacheLocation = currentLocation;
++		_vitaBackCacheMap = map;
++		_vitaBackCacheX = x0 - margin;
++		_vitaBackCacheY = y0 - margin;
++		_vitaBackCacheColumns = columns + 2 * margin;
++		_vitaBackCacheRows = rows + 2 * margin;
++		_vitaBackCacheViewColumns = columns;
++		_vitaBackCacheViewRows = rows;
++		_vitaBackCacheMargin = margin;
++		_vitaBackCacheScale = scale;
++		_vitaBackCacheColor = color;
++		_vitaBackCacheEdits = xTile.Layers.Layer.VitaTileEdits;
++		_vitaBackCacheMapTime = mapTime;
++		_vitaBackCacheNextAnimation = LowRamDisplayDevice.VitaNextAnimationChange;
++		_vitaBackCacheRenderedFrame = _vitaBackCacheFrame;
++		_vitaBackCacheWindowRenders++;
++		VitaPlatform.CachedFrames[3]++;
++		return true;
++	}
++
++	/// <summary>Port: a picture of part of the ground (the paths and floors, or the tilled soil) that the following frames reuse; see <see cref="VitaPrepareGroundCache" />.</summary>
++	private sealed class VitaGroundCache
++	{
++		public readonly int Pass;
++
++		public readonly string Name;
++
++		public RenderTarget2D Target;
++
++		public GameLocation Location;
++
++		public int X;
++
++		public int Y;
++
++		public int Columns;
++
++		public int Rows;
++
++		/// <summary>Tiles around the visible ones on each side (<see cref="VitaCacheMargin" />): X and Y are the picture's corner, Columns and Rows the visible tiles it was drawn for.</summary>
++		public int Margin;
++
++		public float Scale;
++
++		public int Version;
++
++		public int Frame;
++
++		public int RenderedFrame;
++
++		public int WindowStart;
++
++		public int WindowRenders;
++
++		public int OffUntil;
++
++		public VitaGroundCache(int pass, string name)
++		{
++			Pass = pass;
++			Name = name;
++		}
++	}
++
++	private static readonly VitaGroundCache _vitaFloorCache = new VitaGroundCache(1, "@Game1.vitaFloorCache");
++
++	private static readonly VitaGroundCache _vitaSoilCache = new VitaGroundCache(3, "@Game1.vitaSoilCache");
++
++	private bool VitaPrepareFloorCache(RenderTarget2D target_screen)
++	{
++		return !VitaPlatform.LiveFloors && currentLocation != null && currentLocation.VitaHasFlooring && VitaPrepareGroundCache(_vitaFloorCache, target_screen);
++	}
++
++	private bool VitaPrepareSoilCache(RenderTarget2D target_screen)
++	{
++		return !VitaPlatform.LiveFloors && currentLocation != null && currentLocation.VitaHasHoeDirt && VitaPrepareGroundCache(_vitaSoilCache, target_screen);
++	}
++
++	/// <summary>Port: on the Vita, readies a picture of part of the current location's ground for <see cref="VitaDrawGroundCache" />, redrawing it only when stale; false to draw it sprite by sprite as before.</summary>
++	/// <remarks>
++	/// A farm paved and planted in front of the house drew several hundred ground sprites a frame. Two pictures, each drawn
++	/// where its sprites were:
++	/// - Paths and floors (<see cref="GameLocation.VitaFloorPass" /> 1). drawFloorDecorations draws in its own FrontToBack batch
++	///   after the back layers and water: building backgrounds (depth 0), floors (above every rug and background they overlap,
++	///   by depth), rugs. The backgrounds and rugs stay live in that batch (pass 2) and the cached floors go over them.
++	/// - Tilled soil, its watered overlay and fertilizer (pass 3, <see cref="GameLocation.VitaDrawSoil" />). They are the first
++	///   sprites of the sorted world batch (depths 1E-08 to 1.9E-08), over the shadows and the Buildings layer: the picture is
++	///   drawn just before that batch begins, and the crops stay live (<see cref="GameLocation.VitaSoilFromCache" />).
++	/// Both change only with the terrain features (added, removed, neighbours, watered, fertilized: counted in
++	/// <see cref="GameLocation.VitaTerrainVersion" />). Same pixel grid and geometry as the back layer cache: redrawn when the
++	/// camera crosses a tile, the terrain changes, the location or size changes, and at least every 2 seconds; not during
++	/// festivals or in the volcano (its drawFloorDecorations is its own).
++	/// </remarks>
++	private bool VitaPrepareGroundCache(VitaGroundCache cache, RenderTarget2D target_screen)
++	{
++		cache.Frame++;
++		if (!VitaPlatform.IsVita || VitaDebugMenu.NoCachedPictures || takingMapScreenshot || LocalMultiplayer.IsLocalMultiplayer() || currentLocation == null || currentLocation.Map == null || currentLocation.terrainFeatures.Length == 0 || currentLocation is VolcanoDungeon || isFestival() || cache.Frame < cache.OffUntil)
++		{
++			return false;
++		}
++		float directScale = GraphicsDevice.VitaBackBufferScale;
++		float scale;
++		if (directScale == 0.5f || directScale == 0.75f)
++		{
++			scale = directScale;
++		}
++		else if (directScale > 0f)
++		{
++			return false;
++		}
++		else if (target_screen != null || Math.Abs(options.zoomLevel - 1f) < 0.0001f)
++		{
++			scale = 1f;
++		}
++		else
++		{
++			return false;
++		}
++		int x0 = (int)Math.Floor(viewport.X / 64.0);
++		int y0 = (int)Math.Floor(viewport.Y / 64.0);
++		int columns = 2 + (viewport.Width - 1) / 64;
++		int rows = 2 + (viewport.Height - 1) / 64;
++		int version = currentLocation.VitaTerrainVersion;
++		// Refresh floors/soil just before the 120-frame back cache, spreading periodic redraw spikes.
++		int refreshFrames = 120 - cache.Pass;
++		if (cache.Target != null && !cache.Target.IsDisposed && !cache.Target.IsContentLost && cache.Location == currentLocation && VitaCacheCovers(cache.X, cache.Y, cache.Columns, cache.Rows, cache.Margin, x0, y0, columns, rows) && cache.Scale == scale && cache.Version == version && cache.Frame - cache.RenderedFrame < refreshFrames)
++		{
++			return true;
++		}
++		if (cache.Frame - cache.WindowStart >= 60)
++		{
++			bool churning = cache.WindowRenders > 30;
++			cache.WindowStart = cache.Frame;
++			cache.WindowRenders = 0;
++			if (churning)
++			{
++				cache.OffUntil = cache.Frame + 300;
++				return false;
++			}
++		}
++		int margin = VitaCacheMargin;
++		int width = (int)((columns + 2 * margin) * 64 * scale);
++		int height = (int)((rows + 2 * margin) * 64 * scale);
++		if (width * height > 2000000)
++		{
++			return false;
++		}
++		if ((cache.Target == null || cache.Target.IsDisposed || cache.Target.Width != width || cache.Target.Height != height) && !VitaRoomForPicture(width, height, cache.Target))
++		{
++			// No room for the margin: the picture of the visible tiles alone, as before.
++			margin = 0;
++			width = (int)(columns * 64 * scale);
++			height = (int)(rows * 64 * scale);
++		}
++		if (cache.Target == null || cache.Target.IsDisposed || cache.Target.Width != width || cache.Target.Height != height)
++		{
++			if (!VitaRoomForPicture(width, height, cache.Target))
++			{
++				return false;
++			}
++			cache.Target?.Dispose();
++			cache.Target = new RenderTarget2D(graphics.GraphicsDevice, width, height, mipMap: false, SurfaceFormat.Color, DepthFormat.None, 0, RenderTargetUsage.PreserveContents)
++			{
++				Name = cache.Name
++			};
++		}
++		SetRenderTarget(cache.Target);
++		GraphicsDevice.Clear(Microsoft.Xna.Framework.Color.Transparent);
++		// The ground draws relative to Game1.viewport: the cache's own corner while it goes into it.
++		xTile.Dimensions.Rectangle camera = viewport;
++		viewport = new xTile.Dimensions.Rectangle((x0 - margin) * 64, (y0 - margin) * 64, (columns + 2 * margin) * 64, (rows + 2 * margin) * 64);
++		try
++		{
++			spriteBatch.Begin(SpriteSortMode.FrontToBack, BlendState.AlphaBlend, SamplerState.PointClamp, null, null, null, Matrix.CreateScale(scale, scale, 1f));
++			if (cache.Pass == 1)
++			{
++				GameLocation.VitaFloorPass = 1;
++				currentLocation.drawFloorDecorations(spriteBatch);
++			}
++			else
++			{
++				currentLocation.VitaDrawSoil(spriteBatch);
++			}
++			spriteBatch.End();
++		}
++		finally
++		{
++			GameLocation.VitaFloorPass = 0;
++			viewport = camera;
++			SetRenderTarget(target_screen);
++		}
++		cache.Location = currentLocation;
++		cache.X = x0 - margin;
++		cache.Y = y0 - margin;
++		cache.Columns = columns;
++		cache.Rows = rows;
++		cache.Margin = margin;
++		cache.Scale = scale;
++		cache.Version = version;
++		cache.RenderedFrame = cache.Frame;
++		cache.WindowRenders++;
++		VitaPlatform.CachedFrames[3]++;
++		return true;
++	}
++
++	/// <summary>Port: whether vitaGL has room for a cached picture of this size with 6 MB to spare (it takes the game down when it runs out), counting the memory of the picture it replaces (<paramref name="replaced" />, freed first: the two camera distances size them differently); otherwise that picture stays off and its sprites are drawn as before.</summary>
++	private static bool VitaRoomForPicture(int width, int height, RenderTarget2D replaced)
++	{
++		int kb = width * height * 4 / 1024;
++		if (replaced != null && !replaced.IsDisposed)
++		{
++			kb -= replaced.Width * replaced.Height * 4 / 1024;
++		}
++		return VitaPlatform.GraphicsFreeKB() >= kb + 6144;
++	}
++
++	/// <summary>Port: the picture <see cref="VitaPrepareGroundCache" /> readied, where its sprites would go.</summary>
++	private void VitaDrawGroundCache(VitaGroundCache cache)
++	{
++		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
++		spriteBatch.Draw(cache.Target, new Vector2(cache.X * 64 - viewport.X, cache.Y * 64 - viewport.Y), null, Microsoft.Xna.Framework.Color.White, 0f, Vector2.Zero, 1f / cache.Scale, SpriteEffects.None, 0f);
++		spriteBatch.End();
++	}
++
++	/// <summary>Port: the picture <see cref="VitaPrepareBackLayerCache" /> readied, where the back layers' tiles would go.</summary>
++	private void VitaDrawBackLayerCache()
++	{
++		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, null, null);
++		spriteBatch.Draw(_vitaBackCache, new Vector2(_vitaBackCacheX * 64 - viewport.X, _vitaBackCacheY * 64 - viewport.Y), null, Microsoft.Xna.Framework.Color.White, 0f, Vector2.Zero, 1f / _vitaBackCacheScale, SpriteEffects.None, 0f);
++		spriteBatch.End();
++	}
++
+ 	public virtual void DrawCharacterEmotes(GameTime time, RenderTarget2D target_screen)
+ 	{
+ 		if (!eventUp || currentLocation.currentEvent == null)
+@@ -13842,7 +15440,9 @@ public class Game1 : InstanceGame
+ 		{
+ 			spriteBatch.Begin(SpriteSortMode.Deferred, lightingBlend, SamplerState.LinearClamp, null, null);
+ 			Viewport vp = GraphicsDevice.Viewport;
+-			vp.Bounds = target_screen?.Bounds ?? GraphicsDevice.PresentationParameters.Bounds;
++			// Port: drawn straight to the screen (VitaDirectWorldScale), the virtual back buffer's
++			// whole viewport is what the screen buffer's bounds were.
++			vp.Bounds = target_screen?.Bounds ?? (GraphicsDevice.VitaBackBufferScale > 0f ? new Microsoft.Xna.Framework.Rectangle(0, 0, vp.X + vp.Width, vp.Y + vp.Height) : GraphicsDevice.PresentationParameters.Bounds);
+ 			GraphicsDevice.Viewport = vp;
+ 			float render_zoom = options.lightingQuality / 2;
+ 			if (useUnscaledLighting)
+@@ -14012,15 +15612,25 @@ public class Game1 : InstanceGame
+ 				bool isGreenRain = IsGreenRainingHere();
+ 				Microsoft.Xna.Framework.Color rainColor = (isGreenRain ? Microsoft.Xna.Framework.Color.LimeGreen : Microsoft.Xna.Framework.Color.White);
+ 				int vibrancy = ((!isGreenRain) ? 1 : 2);
++				bool cachedRainSources = VitaPlatform.IsVita;
++				if (cachedRainSources && _vitaRainSourceWidth != rainTexture.Width)
++				{
++					for (int frame = 0; frame < _vitaRainSources.Length; frame++)
++					{
++						_vitaRainSources[frame] = getSourceRectForStandardTileSheet(rainTexture, frame, 16, 16);
++					}
++					_vitaRainSourceWidth = rainTexture.Width;
++				}
+ 				for (int i = 0; i < rainDrops.Length; i++)
+ 				{
+ 					for (int j = 0; j < vibrancy; j++)
+ 					{
+-						spriteBatch.Draw(rainTexture, rainDrops[i].position, getSourceRectForStandardTileSheet(rainTexture, rainDrops[i].frame + (isGreenRain ? 4 : 0), 16, 16), rainColor, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++						spriteBatch.Draw(rainTexture, rainDrops[i].position, cachedRainSources ? _vitaRainSources[rainDrops[i].frame + (isGreenRain ? 4 : 0)] : getSourceRectForStandardTileSheet(rainTexture, rainDrops[i].frame + (isGreenRain ? 4 : 0), 16, 16), rainColor, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+ 					}
+ 				}
+ 			}
+ 		}
++		if (IsHudDrawn) VitaQoLOverlay.DrawWorld(spriteBatch);
+ 		hooks.OnRendered(RenderSteps.World_Weather, spriteBatch, time, target_screen);
+ 		spriteBatch.End();
+ 	}
+@@ -14047,6 +15657,11 @@ public class Game1 : InstanceGame
+ 				spriteBatch.End();
+ 			}
+ 		}
++		if (VitaPlatform.DebugMenu)
++		{
++			// Port: the test menu's frame counter, over everything.
++			VitaDebugMenu.DrawOverlay(spriteBatch);
++		}
+ 	}
+ 
+ 	public virtual void DrawSplitScreenWindow()
+@@ -14119,6 +15734,17 @@ public class Game1 : InstanceGame
+ 		return false;
+ 	}
+ 
++	/// <summary>Port: the most a HUD bar (health or energy) may grow beyond its 224 px base height on the Vita, so its top never goes under the day/time box (Game1.dayTimeMoneyBox, 284 px tall) in the top-right corner. The bars grow upward from the bottom of the title-safe area; on a UI viewport only 544 / uiScale px tall, a late-game max health or max energy would push the tip behind the clock. PC: no limit.</summary>
++	private static float VitaHudBarMaxExtra()
++	{
++		if (!VitaPlatform.IsVita || dayTimeMoneyBox == null)
++		{
++			return float.MaxValue;
++		}
++		int boxBottom = dayTimeMoneyBox.yPositionOnScreen + 284 + 4;
++		return Math.Max(0, graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Bottom - 224 - 16 - boxBottom);
++	}
++
+ 	protected virtual void drawHUD()
+ 	{
+ 		if (eventUp || farmEvent != null)
+@@ -14126,7 +15752,10 @@ public class Game1 : InstanceGame
+ 			return;
+ 		}
+ 		float modifier = 0.625f;
+-		Vector2 topOfBar = new Vector2(graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Right - 48 - 8, graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Bottom - 224 - 16 - (int)((float)(player.MaxStamina - 270) * modifier));
++		float vitaBarMaxExtra = VitaHudBarMaxExtra();
++		float staminaExtra = Math.Min((float)(player.MaxStamina - 270) * modifier, vitaBarMaxExtra);
++		float fillModifier = ((staminaExtra < (float)(player.MaxStamina - 270) * modifier && player.MaxStamina > 0) ? ((168.75f + staminaExtra) / (float)player.MaxStamina) : modifier);
++		Vector2 topOfBar = new Vector2(graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Right - 48 - 8, graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Bottom - 224 - 16 - (int)staminaExtra);
+ 		if (isOutdoorMapSmallerThanViewport())
+ 		{
+ 			topOfBar.X = Math.Min(topOfBar.X, -viewport.X + currentLocation.map.Layers[0].LayerWidth * 64 - 48);
+@@ -14138,8 +15767,8 @@ public class Game1 : InstanceGame
+ 		}
+ 		spriteBatch.Draw(mouseCursors, topOfBar, new Microsoft.Xna.Framework.Rectangle(256, 408, 12, 16), Microsoft.Xna.Framework.Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+ 		spriteBatch.Draw(mouseCursors, new Microsoft.Xna.Framework.Rectangle((int)topOfBar.X, (int)(topOfBar.Y + 64f), 48, graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Bottom - 64 - 16 - (int)(topOfBar.Y + 64f - 8f)), new Microsoft.Xna.Framework.Rectangle(256, 424, 12, 16), Microsoft.Xna.Framework.Color.White);
+-		spriteBatch.Draw(mouseCursors, new Vector2(topOfBar.X, topOfBar.Y + 224f + (float)(int)((float)(player.MaxStamina - 270) * modifier) - 64f), new Microsoft.Xna.Framework.Rectangle(256, 448, 12, 16), Microsoft.Xna.Framework.Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+-		Microsoft.Xna.Framework.Rectangle r = new Microsoft.Xna.Framework.Rectangle((int)topOfBar.X + 12, (int)topOfBar.Y + 16 + 32 + (int)((float)player.MaxStamina * modifier) - (int)(Math.Max(0f, player.Stamina) * modifier), 24, (int)(player.Stamina * modifier) - 1);
++		spriteBatch.Draw(mouseCursors, new Vector2(topOfBar.X, topOfBar.Y + 224f + (float)(int)staminaExtra - 64f), new Microsoft.Xna.Framework.Rectangle(256, 448, 12, 16), Microsoft.Xna.Framework.Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++		Microsoft.Xna.Framework.Rectangle r = new Microsoft.Xna.Framework.Rectangle((int)topOfBar.X + 12, (int)topOfBar.Y + 16 + 32 + (int)((float)player.MaxStamina * fillModifier) - (int)(Math.Max(0f, player.Stamina) * fillModifier), 24, (int)(player.Stamina * fillModifier) - 1);
+ 		if ((float)getOldMouseX() >= topOfBar.X && (float)getOldMouseY() >= topOfBar.Y)
+ 		{
+ 			drawWithBorder((int)Math.Max(0f, player.Stamina) + "/" + player.MaxStamina, Microsoft.Xna.Framework.Color.Black * 0f, Microsoft.Xna.Framework.Color.White, topOfBar + new Vector2(0f - dialogueFont.MeasureString("999/999").X - 16f - (float)(showingHealth ? 64 : 0), 64f));
+@@ -14162,13 +15791,14 @@ public class Game1 : InstanceGame
+ 		{
+ 			showingHealthBar = true;
+ 			showingHealth = true;
+-			int bar_full_height = 168 + (player.maxHealth - 100);
++			int healthExtra = (int)Math.Min((float)(player.maxHealth - 100), vitaBarMaxExtra);
++			int bar_full_height = 168 + healthExtra;
+ 			int height = (int)((float)player.health / (float)player.maxHealth * (float)bar_full_height);
+ 			topOfBar.X -= 56 + ((hitShakeTimer > 0) ? random.Next(-3, 4) : 0);
+-			topOfBar.Y = graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Bottom - 224 - 16 - (player.maxHealth - 100);
++			topOfBar.Y = graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Bottom - 224 - 16 - healthExtra;
+ 			spriteBatch.Draw(mouseCursors, topOfBar, new Microsoft.Xna.Framework.Rectangle(268, 408, 12, 16), (player.health < 20) ? (Microsoft.Xna.Framework.Color.Pink * ((float)Math.Sin(currentGameTime.TotalGameTime.TotalMilliseconds / (double)((float)player.health * 50f)) / 4f + 0.9f)) : Microsoft.Xna.Framework.Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+ 			spriteBatch.Draw(mouseCursors, new Microsoft.Xna.Framework.Rectangle((int)topOfBar.X, (int)(topOfBar.Y + 64f), 48, graphics.GraphicsDevice.Viewport.GetTitleSafeArea().Bottom - 64 - 16 - (int)(topOfBar.Y + 64f)), new Microsoft.Xna.Framework.Rectangle(268, 424, 12, 16), (player.health < 20) ? (Microsoft.Xna.Framework.Color.Pink * ((float)Math.Sin(currentGameTime.TotalGameTime.TotalMilliseconds / (double)((float)player.health * 50f)) / 4f + 0.9f)) : Microsoft.Xna.Framework.Color.White);
+-			spriteBatch.Draw(mouseCursors, new Vector2(topOfBar.X, topOfBar.Y + 224f + (float)(player.maxHealth - 100) - 64f), new Microsoft.Xna.Framework.Rectangle(268, 448, 12, 16), (player.health < 20) ? (Microsoft.Xna.Framework.Color.Pink * ((float)Math.Sin(currentGameTime.TotalGameTime.TotalMilliseconds / (double)((float)player.health * 50f)) / 4f + 0.9f)) : Microsoft.Xna.Framework.Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
++			spriteBatch.Draw(mouseCursors, new Vector2(topOfBar.X, topOfBar.Y + 224f + (float)healthExtra - 64f), new Microsoft.Xna.Framework.Rectangle(268, 448, 12, 16), (player.health < 20) ? (Microsoft.Xna.Framework.Color.Pink * ((float)Math.Sin(currentGameTime.TotalGameTime.TotalMilliseconds / (double)((float)player.health * 50f)) / 4f + 0.9f)) : Microsoft.Xna.Framework.Color.White, 0f, Vector2.Zero, 4f, SpriteEffects.None, 1f);
+ 			Microsoft.Xna.Framework.Rectangle health_bar_rect = new Microsoft.Xna.Framework.Rectangle((int)topOfBar.X + 12, (int)topOfBar.Y + 16 + 32 + bar_full_height - height, 24, height);
+ 			c = Utility.getRedToGreenLerpColor((float)player.health / (float)player.maxHealth);
+ 			spriteBatch.Draw(staminaRect, health_bar_rect, staminaRect.Bounds, c, 0f, Vector2.Zero, SpriteEffects.None, 1f);
+@@ -15862,6 +17492,7 @@ public class Game1 : InstanceGame
+ 
+ 	public virtual void ResetGameStateOnTitleScreen()
+ 	{
++		hasShownHostIpInChat = false;
+ 		LocalizedContentManager.localizedAssetNames.Clear();
+ 		Event.invalidFestivals.Clear();
+ 		NPC.invalidDialogueFiles.Clear();
+@@ -15970,14 +17601,23 @@ public class Game1 : InstanceGame
+ 		loadingMessage = "";
+ 		locationRequest = null;
+ 		warpingForForcedRemoteEvent = false;
++		SaveGame.loaded = null;
++		flushLocationLookup();
+ 		locations.Clear();
+ 		mailbox.Clear();
++		(mapDisplayDevice as LowRamDisplayDevice)?.UnloadAll();
+ 		mapDisplayDevice = CreateDisplayDevice(content, GraphicsDevice);
+ 		messageAfterPause = "";
+ 		messagePause = false;
+ 		mouseClickPolling = 0;
+ 		mouseCursor = cursor_default;
+ 		multiplayerMode = 0;
++		VitaTractorRenderer.Reset();
++		VitaTractorMod.Reset();
++		VitaAudioWarmup.Reset();
++		VitaExtraRings.Clear();
++		VitaQoLOverlay.Reset();
++		KeyboardInput.SetTextInputActive(false);
+ 		netWorldState = new NetRoot<NetWorldState>(new NetWorldState());
+ 		newDay = false;
+ 		nonWarpFade = false;
+@@ -16101,10 +17741,28 @@ public class Game1 : InstanceGame
+ 		});
+ 		ItemRegistry.ResetCache();
+ 		Rumble.stopRumbling();
++		if (VitaPlatform.IsVita)
++		{
++			_temporaryContent?.Unload();
++			content.VitaUnloadWorldAssets();
++		}
+ 	}
+ 
+ 	public virtual void CleanupReturningToTitle()
+ 	{
++		// Port: a spread ten-minute update (Vita) left from the game being closed is dropped with it.
++		_vitaTenMinutePending = false;
++		_vitaTenMinuteQueue.Clear();
++		_vitaObjectPasses.Clear();
++		_vitaObjectPassNext = 0;
++		_vitaObjectPassIndex = -1;
++		_vitaObjectPassSnapshot.Clear();
++		// Port: the cached pictures' notes of where they were drawn held a location of the closed game, and through it
++		// the whole world, after the return to the title: loading another save then ran out of memory.
++		_vitaBackCacheLocation = null;
++		_vitaBackCacheMap = null;
++		_vitaFloorCache.Location = null;
++		_vitaSoilCache.Location = null;
+ 		if (game1.IsMainInstance)
+ 		{
+ 			foreach (Game1 instance in GameRunner.instance.gameInstances)
+@@ -16198,22 +17856,27 @@ public class Game1 : InstanceGame
+ 	{
+ 		string filename = screenshot_name + ".png";
+ 		GetScreenshotRegion(screenshotLocation, out var start_x, out var start_y, out var width, out var height);
+-		Bitmap map_bitmap = null;
++		// Port: the XNA build held the whole map in a System.Drawing.Bitmap. Rows are now streamed to
++		// the PNG one band of chunks at a time, so only one band (full width x one chunk high) is held.
++		int chunk_size = 2048;
++		byte[] band_rgb = null;
+ 		bool failed;
+ 		int scaled_width;
+ 		int scaled_height;
++		int scaled_chunk_size;
+ 		do
+ 		{
+ 			failed = false;
+ 			scaled_width = (int)((float)width * scale);
+ 			scaled_height = (int)((float)height * scale);
++			scaled_chunk_size = (int)((float)chunk_size * scale);
+ 			try
+ 			{
+-				map_bitmap = new Bitmap(scaled_width, scaled_height);
++				band_rgb = new byte[scaled_width * Math.Min(scaled_chunk_size, scaled_height) * 3];
+ 			}
+ 			catch (Exception exception)
+ 			{
+-				log.Error("Map Screenshot: Error trying to create Bitmap.", exception);
++				log.Error("Map Screenshot: Error trying to allocate the image buffer.", exception);
+ 				failed = true;
+ 			}
+ 			if (failed)
+@@ -16226,8 +17889,6 @@ public class Game1 : InstanceGame
+ 			}
+ 		}
+ 		while (failed);
+-		int chunk_size = 2048;
+-		int scaled_chunk_size = (int)((float)chunk_size * scale);
+ 		xTile.Dimensions.Rectangle old_viewport = viewport;
+ 		bool old_display_hud = displayHUD;
+ 		takingMapScreenshot = true;
+@@ -16236,13 +17897,18 @@ public class Game1 : InstanceGame
+ 		RenderTarget2D cached_lightmap = _lightmap;
+ 		_lightmap = null;
+ 		bool fail = false;
++		string fullFilePath = Path.Combine(GetScreenshotFolder(), filename);
+ 		try
+ 		{
+ 			allocateLightmap(chunk_size, chunk_size);
+ 			int chunks_wide = (int)Math.Ceiling((float)scaled_width / (float)scaled_chunk_size);
+ 			int chunks_high = (int)Math.Ceiling((float)scaled_height / (float)scaled_chunk_size);
++			using FileStream png_file = File.Create(fullFilePath);
++			using PngStreamWriter png = new PngStreamWriter(png_file, scaled_width, scaled_height);
+ 			for (int y_offset = 0; y_offset < chunks_high; y_offset++)
+ 			{
++				int band_height = Math.Min(scaled_chunk_size, scaled_height - y_offset * scaled_chunk_size);
++				Array.Clear(band_rgb, 0, band_rgb.Length);
+ 				for (int x_offset = 0; x_offset < chunks_wide; x_offset++)
+ 				{
+ 					int current_width = scaled_chunk_size;
+@@ -16259,7 +17925,6 @@ public class Game1 : InstanceGame
+ 					}
+ 					if (current_height > 0 && current_width > 0)
+ 					{
+-						System.Drawing.Rectangle rect = new System.Drawing.Rectangle(current_x, current_y, current_width, current_height);
+ 						RenderTarget2D render_target = new RenderTarget2D(graphics.GraphicsDevice, chunk_size, chunk_size, mipMap: false, SurfaceFormat.Color, DepthFormat.None, 0, RenderTargetUsage.DiscardContents);
+ 						viewport = new xTile.Dimensions.Rectangle(x_offset * chunk_size + start_x, y_offset * chunk_size + start_y, chunk_size, chunk_size);
+ 						_draw(currentGameTime, render_target);
+@@ -16271,33 +17936,39 @@ public class Game1 : InstanceGame
+ 						spriteBatch.End();
+ 						render_target.Dispose();
+ 						GraphicsDevice.SetRenderTarget(null);
+-						BitmapData bitmap_data = map_bitmap.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format24bppRgb);
+-						IntPtr ptr = bitmap_data.Scan0;
+ 						Microsoft.Xna.Framework.Color[] colors = new Microsoft.Xna.Framework.Color[current_width * current_height];
+ 						scaled_render_target.GetData(colors);
+-						int bytes = current_width * current_height * 3;
+-						byte[] rgb_values = new byte[bytes];
+-						for (int i = 0; i < colors.Length; i++)
++						for (int row = 0; row < current_height; row++)
+ 						{
+-							rgb_values[i * 3] = colors[i].B;
+-							rgb_values[i * 3 + 1] = colors[i].G;
+-							rgb_values[i * 3 + 2] = colors[i].R;
++							int dest = (row * scaled_width + current_x) * 3;
++							int src = row * current_width;
++							for (int col = 0; col < current_width; col++)
++							{
++								Microsoft.Xna.Framework.Color pixel = colors[src + col];
++								band_rgb[dest++] = pixel.R;
++								band_rgb[dest++] = pixel.G;
++								band_rgb[dest++] = pixel.B;
++							}
+ 						}
+-						Marshal.Copy(rgb_values, 0, ptr, bytes);
+-						map_bitmap.UnlockBits(bitmap_data);
+ 						scaled_render_target.Dispose();
+ 					}
+ 				}
++				png.WriteRows(band_rgb, band_height);
+ 			}
+-			string fullFilePath = Path.Combine(GetScreenshotFolder(), filename);
+-			map_bitmap.Save(fullFilePath, ImageFormat.Png);
+-			map_bitmap.Dispose();
+ 		}
+ 		catch (Exception exception2)
+ 		{
+ 			log.Error("Map Screenshot: Error taking screenshot.", exception2);
+ 			GraphicsDevice.SetRenderTarget(null);
+ 			fail = true;
++			// The PNG writer pads and closes the file on the way out; don't leave a partial image.
++			try
++			{
++				File.Delete(fullFilePath);
++			}
++			catch (Exception)
++			{
++			}
+ 		}
+ 		if (_lightmap != null)
+ 		{

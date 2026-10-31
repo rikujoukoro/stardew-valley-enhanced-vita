@@ -1,0 +1,141 @@
+--- a/src/Graphics/GraphicsDevice.cs
++++ b/src/Graphics/GraphicsDevice.cs
+@@ -474,8 +474,10 @@
+ 
+ 		#region Internal Sampler Change Queue
+ 
+-		private readonly bool[] modifiedSamplers = new bool[MAX_TEXTURE_SAMPLERS + 1]; // Vita port: last slot = 'any sampler dirty' flag, lets ApplySamplers early-out per draw
+-		private readonly bool[] modifiedVertexSamplers = new bool[MAX_VERTEXTEXTURE_SAMPLERS + 1]; // Vita port: last slot = 'any dirty' flag
++		// Vita port: collections share a one-int dirty mask. Slot 0 alone takes one iteration,
++		// rather than scanning all 16 slots after nearly every SpriteBatch. No per-draw allocation.
++		private readonly int[] modifiedSamplers = new int[1];
++		private readonly int[] modifiedVertexSamplers = new int[1];
+ 
+ 		#endregion
+ 
+@@ -2163,21 +2165,16 @@
+ 
+ 		private void ApplySamplers()
+ 		{
+-			// Vita port: skip both 16/4-slot scans when nothing changed since the last draw (flag set by the collections' setters).
+-			bool[] modS = modifiedSamplers;
+-			bool[] modV = modifiedVertexSamplers;
+-			if (modS[modS.Length - 1])
+-			{
+-				modS[modS.Length - 1] = false;
+-			for (int sampler = 0; sampler < modS.Length - 1; sampler += 1)
+-			{
+-				if (!modifiedSamplers[sampler])
++			// Vita port: consume the dirty slots in their original ascending order. The mask
++			// becomes zero as soon as the highest changed slot has been handled.
++			int dirty = modifiedSamplers[0];
++			for (int sampler = 0; dirty != 0; sampler += 1, dirty >>= 1)
++			{
++				if ((dirty & 1) == 0)
+ 				{
+ 					continue;
+ 				}
+-
+-				modifiedSamplers[sampler] = false;
+-
++				modifiedSamplers[0] &= ~(1 << sampler);
+ 				FNA3D.FNA3D_VerifySampler(
+ 					GLDevice,
+ 					sampler,
+@@ -2187,27 +2184,18 @@
+ 					ref SamplerStates[sampler].state
+ 				);
+ 			}
+-			}
+-
+-			if (!modV[modV.Length - 1])
+-			{
+-				return;
+-			}
+-			modV[modV.Length - 1] = false;
+-			for (int sampler = 0; sampler < modV.Length - 1; sampler += 1) 
+-			{
+-				if (!modifiedVertexSamplers[sampler])
++
++			dirty = modifiedVertexSamplers[0];
++			for (int sampler = 0; dirty != 0; sampler += 1, dirty >>= 1)
++			{
++				if ((dirty & 1) == 0)
+ 				{
+ 					continue;
+ 				}
+-
+-				modifiedVertexSamplers[sampler] = false;
+-
+-				/* Believe it or not, this is actually how VertexTextures are
+-				 * stored in XNA4! Their D3D9 renderer just uses the last 4
+-				 * slots available in the device's sampler array. So that's what
+-				 * we get to do.
+-				 * -flibit
++				modifiedVertexSamplers[0] &= ~(1 << sampler);
++
++				/* XNA4 stores vertex textures in the last four device sampler slots;
++				 * FNA3D_VerifyVertexSampler keeps that mapping unchanged.
+ 				 */
+ 				FNA3D.FNA3D_VerifyVertexSampler(
+ 					GLDevice,
+--- a/src/Graphics/TextureCollection.cs
++++ b/src/Graphics/TextureCollection.cs
+@@ -55,8 +55,7 @@
+ 					throw new ArgumentOutOfRangeException("index");
+ 				}
+ 				textures[index] = value;
+-				modifiedSamplers[index] = true;
+-				modifiedSamplers[modifiedSamplers.Length - 1] = true; // Vita port: any-dirty flag
++				modifiedSamplers[0] |= 1 << index; // Vita port: mark only this slot dirty
+ 			}
+ 		}
+ 
+@@ -71,7 +70,7 @@
+ 		#region Private Variables
+ 
+ 		private readonly Texture[] textures;
+-		private readonly bool[] modifiedSamplers;
++		private readonly int[] modifiedSamplers;
+ 
+ 		#endregion
+ 
+@@ -79,7 +78,7 @@
+ 
+ 		internal TextureCollection(
+ 			int slots,
+-			bool[] modSamplers
++			int[] modSamplers
+ 		) {
+ 			textures = new Texture[slots];
+ 			modifiedSamplers = modSamplers;
+--- a/src/Graphics/SamplerStateCollection.cs
++++ b/src/Graphics/SamplerStateCollection.cs
+@@ -39,8 +39,7 @@
+ 				}
+ 				value.graphicsDevice = pDevice;
+ 				samplers[index] = value;
+-				modifiedSamplers[index] = true;
+-				modifiedSamplers[modifiedSamplers.Length - 1] = true; // Vita port: any-dirty flag
++				modifiedSamplers[0] |= 1 << index; // Vita port: mark only this slot dirty
+ 			}
+ 		}
+ 
+@@ -50,7 +49,7 @@
+ 
+ 		private readonly GraphicsDevice pDevice;
+ 		private readonly SamplerState[] samplers;
+-		private readonly bool[] modifiedSamplers;
++		private readonly int[] modifiedSamplers;
+ 
+ 		#endregion
+ 
+@@ -59,7 +58,7 @@
+ 		internal SamplerStateCollection(
+ 			GraphicsDevice pParent,
+ 			int slots,
+-			bool[] modSamplers
++			int[] modSamplers
+ 		) {
+ 			pDevice = pParent;
+ 			samplers = new SamplerState[slots];

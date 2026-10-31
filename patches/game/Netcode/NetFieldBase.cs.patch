@@ -1,0 +1,106 @@
+diff --git a/Netcode/NetFieldBase.cs b/Netcode/NetFieldBase.cs
+index 2d7feaa6c0f355a9a7f9ed5ab4bd4647eecc1189..15ee0de32d6957b5f784b277d7fff3439f917530 100644
+--- a/Netcode/NetFieldBase.cs
++++ b/Netcode/NetFieldBase.cs
+@@ -17,13 +17,18 @@ public abstract class NetFieldBase<T, TSelf> : AbstractNetSerializable, IEquatab
+ 
+ 	protected NetFieldBaseBool _bools;
+ 
+-	protected uint interpolationStartTick;
+-
+ 	protected T value;
+ 
+-	protected T previousValue;
+-
+-	protected T targetValue;
++	// Keep single-player fields small; allocate history only on a remote interpolation.
++	private sealed class InterpolationState
++	{
++		public uint StartTick;
++		public T Previous, Target;
++	}
++	private InterpolationState interpolation;
++	protected uint interpolationStartTick => interpolation == null ? 0u : interpolation.StartTick;
++	protected T previousValue => interpolation == null ? default : interpolation.Previous;
++	protected T targetValue => interpolation == null ? value : interpolation.Target;
+ 
+ 	public bool InterpolationEnabled
+ 	{
+@@ -123,8 +128,6 @@ public abstract class NetFieldBase<T, TSelf> : AbstractNetSerializable, IEquatab
+ 	{
+ 		InterpolationWait = true;
+ 		value = default;
+-		previousValue = default;
+-		targetValue = default;
+ 	}
+ 
+ 	public NetFieldBase(T value)
+@@ -172,14 +175,14 @@ public abstract class NetFieldBase<T, TSelf> : AbstractNetSerializable, IEquatab
+ 	{
+ 		if (Root != null && InterpolationTicks() > 0)
+ 		{
+-			float factor = InterpolationFactor();
+-			bool shouldExtrapolate = ExtrapolationEnabled && ChangeVersion[0] == Root.Clock.netVersion[0];
+-			if ((factor < 1f && InterpolationEnabled) || (shouldExtrapolate && factor < 3f))
++			float num = InterpolationFactor();
++			bool flag = ExtrapolationEnabled && ChangeVersion[0] == Root.Clock.netVersion[0];
++			if ((num < 1f && InterpolationEnabled) || (flag && num < 3f))
+ 			{
+-				value = interpolate(previousValue, targetValue, factor);
++				value = interpolate(previousValue, targetValue, num);
+ 				return true;
+ 			}
+-			if (factor < 1f && InterpolationWait)
++			if (num < 1f && InterpolationWait)
+ 			{
+ 				value = previousValue;
+ 				return true;
+@@ -199,7 +202,7 @@ public abstract class NetFieldBase<T, TSelf> : AbstractNetSerializable, IEquatab
+ 		if (NeedsTick)
+ 		{
+ 			value = targetValue;
+-			previousValue = default;
++			if (interpolation != null) interpolation.Previous = default;
+ 			NeedsTick = false;
+ 		}
+ 	}
+@@ -232,14 +235,14 @@ public abstract class NetFieldBase<T, TSelf> : AbstractNetSerializable, IEquatab
+ 	protected void cleanSet(T newValue)
+ 	{
+ 		T oldValue = value;
+-		T oldTargetValue = targetValue;
+-		targetValue = newValue;
++		T oldValue2 = targetValue;
++		if (interpolation != null) interpolation.Target = newValue;
+ 		value = newValue;
+-		previousValue = default;
++		if (interpolation != null) interpolation.Previous = default;
+ 		NeedsTick = false;
+ 		if (notifyOnTargetValueChange)
+ 		{
+-			targetValueChanged(oldTargetValue, newValue);
++			targetValueChanged(oldValue2, newValue);
+ 		}
+ 		if (fieldChangeEvent != null)
+ 		{
+@@ -264,14 +267,15 @@ public abstract class NetFieldBase<T, TSelf> : AbstractNetSerializable, IEquatab
+ 			cleanSet(newValue);
+ 			return;
+ 		}
+-		T oldTargetValue = targetValue;
+-		previousValue = oldValue;
++		T oldValue2 = targetValue;
++		if (interpolation == null) interpolation = new InterpolationState();
++		interpolation.Previous = oldValue;
+ 		NeedsTick = true;
+-		targetValue = newValue;
+-		interpolationStartTick = Root.Clock.GetLocalTick();
++		if (interpolation != null) interpolation.Target = newValue;
++		interpolation.StartTick = Root.Clock.GetLocalTick();
+ 		if (notifyOnTargetValueChange)
+ 		{
+-			targetValueChanged(oldTargetValue, newValue);
++			targetValueChanged(oldValue2, newValue);
+ 		}
+ 		if (fieldChangeEvent != null)
+ 		{

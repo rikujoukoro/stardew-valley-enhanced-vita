@@ -1,0 +1,46 @@
+diff --git a/src/Content/LzxDecoder.cs b/src/Content/LzxDecoder.cs
+index 55fa646749d34c5b78463750bb83dc9f08542333..1af76e83df452383731529e119f099cc51633b04 100644
+--- a/src/Content/LzxDecoder.cs
++++ b/src/Content/LzxDecoder.cs
+@@ -88,6 +88,41 @@ namespace Microsoft.Xna.Framework.Content
+ 			for(int i = 0; i < LzxConstants.LENGTH_MAXSYMBOLS; i++) m_state.LENGTH_len[i] = 0;
+ 		}
+ 		
++		/* Port: restores the exact state the constructor produces, so one decoder
++		 * can be reused per asset (saves a 64 KB alloc + byte-by-byte fill + 8 table
++		 * allocations on every asset load).
++		 */
++		public void Reset ()
++		{
++			byte[] window = m_state.window;
++			window[0] = 0xDC;
++			int filled = 1;
++			while (filled < window.Length)
++			{
++				int n = Math.Min(filled, window.Length - filled);
++				Buffer.BlockCopy(window, 0, window, filled, n);
++				filled += n;
++			}
++			m_state.window_posn = 0;
++			m_state.R0 = m_state.R1 = m_state.R2 = 1;
++			m_state.header_read = 0;
++			m_state.frames_read = 0;
++			m_state.block_remaining = 0;
++			m_state.block_length = 0;
++			m_state.block_type = LzxConstants.BLOCKTYPE.INVALID;
++			m_state.intel_filesize = 0;
++			m_state.intel_curpos = 0;
++			m_state.intel_started = 0;
++			Array.Clear(m_state.PRETREE_table, 0, m_state.PRETREE_table.Length);
++			Array.Clear(m_state.PRETREE_len, 0, m_state.PRETREE_len.Length);
++			Array.Clear(m_state.MAINTREE_table, 0, m_state.MAINTREE_table.Length);
++			Array.Clear(m_state.MAINTREE_len, 0, m_state.MAINTREE_len.Length);
++			Array.Clear(m_state.LENGTH_table, 0, m_state.LENGTH_table.Length);
++			Array.Clear(m_state.LENGTH_len, 0, m_state.LENGTH_len.Length);
++			Array.Clear(m_state.ALIGNED_table, 0, m_state.ALIGNED_table.Length);
++			Array.Clear(m_state.ALIGNED_len, 0, m_state.ALIGNED_len.Length);
++		}
++
+ 		public int Decompress(Stream inData, int inLen, Stream outData, int outLen)
+ 		{
+ 			BitBuffer bitbuf = new BitBuffer(inData);

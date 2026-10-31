@@ -1,0 +1,131 @@
+diff --git a/StardewValley.Menus/EmoteMenu.cs b/StardewValley.Menus/EmoteMenu.cs
+index b68cf244cc5c4478a018c3fabb35e5b5eaeef9cc..0fbfb47e5d9a84ad36fa4c1f1758dbbe049e23e6 100644
+--- a/StardewValley.Menus/EmoteMenu.cs
++++ b/StardewValley.Menus/EmoteMenu.cs
+@@ -43,7 +43,7 @@ public class EmoteMenu : IClickableMenu
+ 
+ 	public EmoteMenu()
+ 	{
+-		menuBackgroundTexture = Game1.temporaryContent.Load<Texture2D>("LooseSprites\\EmoteMenu");
++		menuBackgroundTexture = Game1.content.Load<Texture2D>("LooseSprites\\EmoteMenu");
+ 		width = 256;
+ 		height = 256;
+ 		xPositionOnScreen = (int)((float)(Game1.viewport.Width / 2) - (float)width / 2f);
+@@ -183,7 +183,14 @@ public class EmoteMenu : IClickableMenu
+ 		_buttonRadius = (int)((float)_age / (float)_expandTime * (float)_expandedButtonRadius);
+ 		_SnapToPlayerPosition();
+ 		Vector2 offset = default;
+-		if (gamepadMode)
++		if (gamepadMode && VitaPlatform.IsVita)
++		{
++			if (VitaUpdatePad())
++			{
++				return;
++			}
++		}
++		else if (gamepadMode)
+ 		{
+ 			_mouseStartPosition = Game1.getMousePosition(ui_scale: false);
+ 			if (Math.Abs(Game1.input.GetGamePadState().ThumbSticks.Right.X) > 0.5f || Math.Abs(Game1.input.GetGamePadState().ThumbSticks.Right.Y) > 0.5f)
+@@ -271,17 +278,100 @@ public class EmoteMenu : IClickableMenu
+ 		base.receiveLeftClick(x, y, playSound);
+ 	}
+ 
++	/// <summary>Buttons held when the Vita menu opened must be released before they act (R+SELECT opens it).</summary>
++	private bool _vitaConfirmWasDown = true;
++
++	private bool _vitaCancelWasDown = true;
++
++	/// <summary>
++	/// Port: the Vita opens this with R+SELECT, not by holding the right stick, so the vanilla
++	/// "stick released = confirm" rule closed it 100 ms later with nothing chosen. Here it stays open:
++	/// either stick or the D-pad picks, Cross confirms, Circle closes. Returns true once the menu closed.
++	/// </summary>
++	private bool VitaUpdatePad()
++	{
++		GamePadState pad = Game1.input.GetGamePadState();
++		_mouseStartPosition = Game1.getMousePosition(ui_scale: false);
++		Vector2 offset = pad.ThumbSticks.Right;
++		if (Math.Abs(offset.X) <= 0.5f && Math.Abs(offset.Y) <= 0.5f)
++		{
++			offset = pad.ThumbSticks.Left;
++		}
++		if (Math.Abs(offset.X) <= 0.5f && Math.Abs(offset.Y) <= 0.5f)
++		{
++			offset = Vector2.Zero;
++			if (pad.IsButtonDown(Buttons.DPadLeft)) offset.X -= 1f;
++			if (pad.IsButtonDown(Buttons.DPadRight)) offset.X += 1f;
++			if (pad.IsButtonDown(Buttons.DPadUp)) offset.Y += 1f;
++			if (pad.IsButtonDown(Buttons.DPadDown)) offset.Y -= 1f;
++		}
++		if (offset != Vector2.Zero)
++		{
++			_hasSelectedEmote = true;
++			offset.Y *= -1f;
++			offset.Normalize();
++			float highest_dot = -1f;
++			for (int i = 0; i < _emoteButtons.Count; i++)
++			{
++				Vector2 button = new Vector2((float)_emoteButtons[i].bounds.Center.X - ((float)xPositionOnScreen + (float)width / 2f), (float)_emoteButtons[i].bounds.Center.Y - ((float)yPositionOnScreen + (float)height / 2f));
++				float dot = Vector2.Dot(offset, button);
++				if (dot > highest_dot)
++				{
++					highest_dot = dot;
++					_selectedEmote = emotes[i];
++					_selectedIndex = i;
++				}
++			}
++		}
++		bool confirmDown = pad.IsButtonDown(Buttons.A);
++		bool cancelDown = pad.IsButtonDown(Buttons.B);
++		bool confirm = confirmDown && !_vitaConfirmWasDown;
++		bool cancel = cancelDown && !_vitaCancelWasDown;
++		_vitaConfirmWasDown = confirmDown;
++		_vitaCancelWasDown = cancelDown;
++		if (cancel)
++		{
++			exitThisMenuNoSound();
++			return true;
++		}
++		if (confirm && _selectedEmote != null)
++		{
++			ConfirmSelection();
++			return true;
++		}
++		return false;
++	}
++
+ 	public void ConfirmSelection()
+ 	{
+ 		if (_selectedEmote != null)
+ 		{
+-			Game1.chatBox.textBoxEnter("/emote " + _selectedEmote);
++			// Port: single-player Vita saves have no chat box until L+SELECT makes one.
++			if (Game1.chatBox != null)
++			{
++				Game1.chatBox.textBoxEnter("/emote " + _selectedEmote);
++			}
++			else
++			{
++				Game1.player.netDoEmote(_selectedEmote);
++			}
+ 		}
+ 		exitThisMenu(playSound: false);
+ 	}
+ 
+ 	public override void draw(SpriteBatch b)
+ 	{
++		if (menuBackgroundTexture == null || menuBackgroundTexture.IsDisposed)
++		{
++			menuBackgroundTexture = Game1.content.Load<Texture2D>("LooseSprites\\EmoteMenu");
++			if (_emoteButtons != null)
++			{
++				foreach (ClickableTextureComponent btn in _emoteButtons)
++				{
++					btn.texture = menuBackgroundTexture;
++				}
++			}
++		}
+ 		Game1.StartWorldDrawInUI(b);
+ 		Color background_color = Color.White;
+ 		background_color.A = (byte)Utility.Lerp(0f, 255f, _alpha);

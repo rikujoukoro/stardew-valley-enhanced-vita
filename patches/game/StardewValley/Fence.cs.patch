@@ -1,0 +1,63 @@
+diff --git a/StardewValley/Fence.cs b/StardewValley/Fence.cs
+index 0f0f32b9c4fec2e518d46fe495cdbd87e57b4015..87a2c207f1ca9831e097bacea75161fd9508fea0 100644
+--- a/StardewValley/Fence.cs
++++ b/StardewValley/Fence.cs
+@@ -197,6 +197,19 @@ public class Fence : Object
+ 		}
+ 	}
+ 
++	/// <summary>Port: a fence's update only does something for a queued repair, a moving or open gate, or what it holds (a torch); farms have hundreds of fences.</summary>
++	internal override bool NeedsFrameUpdate
++	{
++		get
++		{
++			if (gateMotion == 0 && !repairQueued.Value && gatePosition.Value != 88)
++			{
++				return heldObject.Value != null;
++			}
++			return true;
++		}
++	}
++
+ 	public override void updateWhenCurrentLocation(GameTime time)
+ 	{
+ 		PerformRepairIfNecessary();
+@@ -495,6 +508,29 @@ public class Fence : Object
+ 		return allowAnyTool;
+ 	}
+ 
++	private static int _vitaGoldClockTick = int.MinValue;
++
++	private static bool _vitaGoldClockBuilt;
++
++	/// <summary>
++	/// Port: whether a Gold Clock stands, looked up once a tick on the Vita. Every fence asked on every ten-minute
++	/// update, and each answer walked every building of every location with buildings: hundreds of fences times the
++	/// farm's buildings, in the frame the clock ticked. Buildings don't change within a tick.
++	/// </summary>
++	private static bool VitaGoldClockBuilt()
++	{
++		if (!VitaPlatform.IsVita)
++		{
++			return Game1.IsBuildingConstructed("Gold Clock");
++		}
++		if (_vitaGoldClockTick != Game1.ticks)
++		{
++			_vitaGoldClockBuilt = Game1.IsBuildingConstructed("Gold Clock");
++			_vitaGoldClockTick = Game1.ticks;
++		}
++		return _vitaGoldClockBuilt;
++	}
++
+ 	public override bool minutesElapsed(int minutes)
+ 	{
+ 		if (!Game1.IsMasterGame)
+@@ -502,7 +538,7 @@ public class Fence : Object
+ 			return false;
+ 		}
+ 		PerformRepairIfNecessary();
+-		if (!Game1.IsBuildingConstructed("Gold Clock") || Game1.netWorldState.Value.goldenClocksTurnedOff.Value)
++		if (!VitaGoldClockBuilt() || Game1.netWorldState.Value.goldenClocksTurnedOff.Value)
+ 		{
+ 			health.Value -= (float)minutes / 1440f;
+ 			if (health.Value <= -1f && (Game1.timeOfDay <= 610 || Game1.timeOfDay > 1800))

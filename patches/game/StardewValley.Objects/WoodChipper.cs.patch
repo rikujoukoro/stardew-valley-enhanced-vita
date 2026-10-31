@@ -1,0 +1,15 @@
+diff --git a/StardewValley.Objects/WoodChipper.cs b/StardewValley.Objects/WoodChipper.cs
+index 54fd7e9ff79bfaabe00c120b6ff65e6d52ad82ca..abbb616fb7ca65ac1a6c354ea8eb72f15c307965 100644
+--- a/StardewValley.Objects/WoodChipper.cs
++++ b/StardewValley.Objects/WoodChipper.cs
+@@ -144,8 +144,8 @@ public class WoodChipper : Object
+ 	{
+ 		if (Location != null && depositedItem.Value != null && MinutesUntilReady > 0)
+ 		{
+-			nextShakeTime -= time.ElapsedGameTime.Milliseconds;
+-			nextSmokeTime -= time.ElapsedGameTime.Milliseconds;
++			nextShakeTime -= Utility.ElapsedMs(time.ElapsedGameTime);
++			nextSmokeTime -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 			if (nextSmokeTime <= 0)
+ 			{
+ 				nextSmokeTime = Game1.random.Next(3000, 6000);

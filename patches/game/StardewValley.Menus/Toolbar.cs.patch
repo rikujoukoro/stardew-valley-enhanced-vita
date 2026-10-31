@@ -1,0 +1,55 @@
+diff --git a/StardewValley.Menus/Toolbar.cs b/StardewValley.Menus/Toolbar.cs
+index fb1c99ec20b5c144f323f9720706c9aa341cdbde..e3e279408f0b7124f101fc570fecb56c009f945a 100644
+--- a/StardewValley.Menus/Toolbar.cs
++++ b/StardewValley.Menus/Toolbar.cs
+@@ -190,22 +190,42 @@ public class Toolbar : IClickableMenu
+ 			}
+ 		}
+ 		IClickableMenu.drawTextureBox(b, Game1.menuTexture, toolbarTextSource, Game1.uiViewport.Width / 2 - 384 - 16, yPositionOnScreen - 96 - 8, 800, 96, Color.White * transparency, 1f, drawShadow: false);
++		int baseX = Game1.uiViewport.Width / 2 - 384;
++		int drawY = yPositionOnScreen - 96 + 8;
++		int currentToolIndex = Game1.player.CurrentToolIndex;
++		Color slotColor = Color.White * transparency;
++		bool drawSlotText = !Game1.options.gamepadControls;
++		Color textColor = drawSlotText ? (Color.DimGray * transparency) : default(Color);
++		Rectangle activeRect = Game1.getSourceRectForStandardTileSheet(Game1.menuTexture, 56);
++		Rectangle inactiveRect = Game1.getSourceRectForStandardTileSheet(Game1.menuTexture, 10);
++		Vector2 toDraw = new Vector2(baseX, drawY);
+ 		for (int j = 0; j < 12; j++)
+ 		{
+-			Vector2 toDraw = new Vector2(Game1.uiViewport.Width / 2 - 384 + j * 64, yPositionOnScreen - 96 + 8);
+-			b.Draw(Game1.menuTexture, toDraw, Game1.getSourceRectForStandardTileSheet(Game1.menuTexture, (Game1.player.CurrentToolIndex == j) ? 56 : 10), Color.White * transparency);
+-			if (!Game1.options.gamepadControls)
++			toDraw.X = baseX + (j << 6);
++			b.Draw(Game1.menuTexture, toDraw, (currentToolIndex == j) ? activeRect : inactiveRect, slotColor);
++			if (drawSlotText)
+ 			{
+-				b.DrawString(Game1.tinyFont, slotText[j], toDraw + new Vector2(4f, -8f), Color.DimGray * transparency);
++				b.DrawString(Game1.tinyFont, slotText[j], new Vector2(toDraw.X + 4f, toDraw.Y - 8f), textColor);
+ 			}
+ 		}
++		var items = Game1.player.Items;
++		int itemCount = items.Count;
+ 		for (int k = 0; k < 12; k++)
+ 		{
+-			buttons[k].scale = Math.Max(1f, buttons[k].scale - 0.025f);
+-			Vector2 toDraw2 = new Vector2(Game1.uiViewport.Width / 2 - 384 + k * 64, yPositionOnScreen - 96 + 8);
+-			if (Game1.player.Items.Count > k && Game1.player.Items[k] != null)
++			float bScale = buttons[k].scale - 0.025f;
++			if (bScale < 1f)
+ 			{
+-				Game1.player.Items[k].drawInMenu(b, toDraw2, (Game1.player.CurrentToolIndex == k) ? 0.9f : (buttons[k].scale * 0.8f), transparency, 0.88f);
++				bScale = 1f;
++			}
++			buttons[k].scale = bScale;
++			if (itemCount > k)
++			{
++				Item slotItem = items[k];
++				if (slotItem != null)
++				{
++					toDraw.X = baseX + (k << 6);
++					slotItem.drawInMenu(b, toDraw, (currentToolIndex == k) ? 0.9f : (bScale * 0.8f), transparency, 0.88f);
++				}
+ 			}
+ 		}
+ 		if (hoverItem != null)

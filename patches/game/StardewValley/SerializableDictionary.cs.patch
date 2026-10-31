@@ -1,0 +1,37 @@
+diff --git a/StardewValley/SerializableDictionary.cs b/StardewValley/SerializableDictionary.cs
+index 84d6a2f350a6fbd068b7853261de7dd7c081661e..75d26a738cbcf01d25a233f00aae21b021dd507d 100644
+--- a/StardewValley/SerializableDictionary.cs
++++ b/StardewValley/SerializableDictionary.cs
+@@ -115,6 +115,8 @@ public class SerializableDictionary<TKey, TValue> : Dictionary<TKey, TValue>, IX
+ 		}
+ 		while (reader.NodeType != XmlNodeType.EndElement)
+ 		{
++			// Port: reading a save takes seconds; keep the loading screen moving.
++			Game1.PumpVitaLoadingScreen();
+ 			reader.ReadStartElement("item");
+ 			reader.ReadStartElement("key");
+ 			bool read = false;
+@@ -138,6 +140,11 @@ public class SerializableDictionary<TKey, TValue> : Dictionary<TKey, TValue>, IX
+ 					read = true;
+ 				}
+ 			}
++			if (!read && SaveSerializer.TryReadPrimitive(reader, typeof(TKey), out object primitiveKey))
++			{
++				key = (TKey)primitiveKey;
++				read = true;
++			}
+ 			if (!read)
+ 			{
+ 				key = (TKey)_keySerializer.DeserializeFast(reader);
+@@ -151,6 +158,11 @@ public class SerializableDictionary<TKey, TValue> : Dictionary<TKey, TValue>, IX
+ 				value = (TValue)Convert.ChangeType(SaveSerializer.Deserialize<int>(reader), typeof(TValue));
+ 				read = true;
+ 			}
++			if (!read && SaveSerializer.TryReadPrimitive(reader, typeof(TValue), out object primitiveValue))
++			{
++				value = (TValue)primitiveValue;
++				read = true;
++			}
+ 			if (!read)
+ 			{
+ 				value = (TValue)_valueSerializer.DeserializeFast(reader);

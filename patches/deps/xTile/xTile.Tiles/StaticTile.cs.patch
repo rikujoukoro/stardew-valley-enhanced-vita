@@ -1,0 +1,45 @@
+diff --git a/xTile.Tiles/StaticTile.cs b/xTile.Tiles/StaticTile.cs
+index fa73acfacf1c6bd33ba0adba3b166335d82d1753..80ca2144c9cd971932e3ea12a124bae14cbd63ec 100644
+--- a/xTile.Tiles/StaticTile.cs
++++ b/xTile.Tiles/StaticTile.cs
+@@ -20,6 +20,7 @@ public class StaticTile : Tile
+ 		set
+ 		{
+ 			m_blendMode = value;
++			Layer.VitaTileEdits++;
+ 		}
+ 	}
+ 
+@@ -34,9 +35,16 @@ public class StaticTile : Tile
+ 		set
+ 		{
+ 			m_tileIndex = value;
++			Layer.VitaTileEdits++;
+ 		}
+ 	}
+ 
++	/// <summary>Port: <see cref="TileSheet" /> without the virtual call, for the tile draw path.</summary>
++	public TileSheet RawTileSheet => m_tileSheet;
++
++	/// <summary>Port: <see cref="TileIndex" /> without the virtual call, for the tile draw path.</summary>
++	public int RawTileIndex => m_tileIndex;
++
+ 	public StaticTile(Layer layer, TileSheet tileSheet, BlendMode blendMode, int tileIndex)
+ 		: base(layer)
+ 	{
+@@ -53,6 +61,15 @@ public class StaticTile : Tile
+ 		m_tileIndex = tileIndex;
+ 	}
+ 
++	/// <summary>Port: for the map reader, whose tile sheet comes from the map's own sheet list, so the per-tile list scan is skipped.</summary>
++	internal StaticTile(Layer layer, TileSheet tileSheet, BlendMode blendMode, int tileIndex, bool tileSheetIsInMap)
++		: base(layer)
++	{
++		m_blendMode = blendMode;
++		m_tileSheet = tileSheet;
++		m_tileIndex = tileIndex;
++	}
++
+ 	public override bool DependsOnTileSheet(TileSheet tileSheet)
+ 	{
+ 		return m_tileSheet == tileSheet;

@@ -1,0 +1,14 @@
+diff --git a/StardewValley.Extensions/FrameworkExtensions.cs b/StardewValley.Extensions/FrameworkExtensions.cs
+index da69d7e0dac6c056b935a4f9e2fb45177325e48b..f4d5e445c175f48f5631e1adc159f41308d9207c 100644
+--- a/StardewValley.Extensions/FrameworkExtensions.cs
++++ b/StardewValley.Extensions/FrameworkExtensions.cs
+@@ -73,7 +73,8 @@ public static class FrameworkExtensions
+ 
+ 	public static bool TryGetValue(this IPropertyCollection properties, string key, out string value)
+ 	{
+-		if (!properties.TryGetValue(key, out var propertyValue))
++		// Port: null for a tile's PropertiesIfAny when it has none
++		if (properties == null || !properties.TryGetValue(key, out var propertyValue))
+ 		{
+ 			value = null;
+ 			return false;

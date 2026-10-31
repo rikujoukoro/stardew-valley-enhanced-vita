@@ -1,0 +1,62 @@
+diff --git a/StardewValley.Buildings/Building.cs b/StardewValley.Buildings/Building.cs
+index 7d820e22a9e2433c4d5dfd65a00ab6447bc7f662..2aadb43f2f5ca0984f8f87a0ecd6df60b08f9099 100644
+--- a/StardewValley.Buildings/Building.cs
++++ b/StardewValley.Buildings/Building.cs
+@@ -426,13 +426,33 @@ public class Building : INetObject<NetFields>, IHaveModData
+ 
+ 	public virtual BuildingData GetData()
+ 	{
+-		if (!TryGetData(buildingType.Value, out var data))
++		// Port: asked many times per building per frame (drawing, shadows, updates); the string-keyed
++		// lookup only reruns when the type or the loaded data changes.
++		string type = buildingType.Value;
++		IDictionary<string, BuildingData> source = Game1.buildingData;
++		if (type != null && (object)type == _dataType && source == _dataSource)
+ 		{
+-			return null;
++			return _data;
++		}
++		if (!TryGetData(type, out var data))
++		{
++			data = null;
+ 		}
++		_dataType = type;
++		_dataSource = source;
++		_data = data;
+ 		return data;
+ 	}
+ 
++	private string _dataType;
++
++	private IDictionary<string, BuildingData> _dataSource;
++
++	private BuildingData _data;
++
++	/// <summary>Port: <see cref="resetTexture" /> as one delegate, not a new one per building per tick.</summary>
++	private Action _resetTextureAction;
++
+ 	public static bool TryGetData(string buildingType, out BuildingData data)
+ 	{
+ 		if (buildingType == null)
+@@ -1299,10 +1319,10 @@ public class Building : INetObject<NetFields>, IHaveModData
+ 		{
+ 			indoors.Value.netAudio.Update();
+ 		}
+-		netBuildingPaintColor.Value?.Poll(resetTexture);
++		netBuildingPaintColor.Value?.Poll(_resetTextureAction ??= resetTexture);
+ 		if (newConstructionTimer.Value > 0)
+ 		{
+-			newConstructionTimer.Value -= time.ElapsedGameTime.Milliseconds;
++			newConstructionTimer.Value -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 			if (newConstructionTimer.Value <= 0 && magical.Value)
+ 			{
+ 				daysOfConstructionLeft.Value = 0;
+@@ -1382,7 +1402,7 @@ public class Building : INetObject<NetFields>, IHaveModData
+ 		{
+ 			return;
+ 		}
+-		chimneyTimer -= time.ElapsedGameTime.Milliseconds;
++		chimneyTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 		if (chimneyTimer <= 0)
+ 		{
+ 			if (interior.hasActiveFireplace())

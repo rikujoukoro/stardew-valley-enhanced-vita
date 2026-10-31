@@ -1,0 +1,180 @@
+diff --git a/StardewValley/KeyboardInput.cs b/StardewValley/KeyboardInput.cs
+index 5452006f4ea5c58977eea53393a8018de39b8c86..5828d9cd7d0bb2b1204e45968d39389d13f279a1 100644
+--- a/StardewValley/KeyboardInput.cs
++++ b/StardewValley/KeyboardInput.cs
+@@ -1,37 +1,29 @@
+ using System;
+-using System.Runtime.InteropServices;
++using System.Collections.Generic;
+ using Microsoft.Xna.Framework;
+ using Microsoft.Xna.Framework.Input;
+ 
+ namespace StardewValley;
+ 
++/// <summary>Text and key events for <see cref="KeyboardDispatcher" />.</summary>
++/// <remarks>
++/// Port: the XNA build subclassed the Win32 window procedure (SetWindowLong) to get WM_CHAR and
++/// WM_KEYDOWN. Under FNA the window is an SDL window, so text comes from FNA's TextInputEXT instead.
++/// FNA also reports Backspace, Tab, Enter and Ctrl+V as the control characters WM_CHAR produced
++/// (8, 9, 13, 22), so the dispatcher's handling is unchanged. Key down/up events are derived from the
++/// keyboard state each poll. On platforms with an on-screen keyboard (SDL's Vita backend shows the
++/// system IME), starting text input is what opens it, so it is only active while a text box has
++/// keyboard focus.
++/// </remarks>
+ public static class KeyboardInput
+ {
+-	private delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+-
+ 	private static bool initialized;
+ 
+-	private static IntPtr prevWndProc;
+-
+-	private static WndProc hookProcDelegate;
+-
+-	private static IntPtr hIMC;
+-
+-	private const int GWL_WNDPROC = -4;
+-
+-	private const int WM_KEYDOWN = 256;
+-
+-	private const int WM_KEYUP = 257;
+-
+-	private const int WM_CHAR = 258;
+-
+-	private const int WM_IME_SETCONTEXT = 641;
+-
+-	private const int WM_INPUTLANGCHANGE = 81;
++	private static bool textInputActive;
+ 
+-	private const int WM_GETDLGCODE = 135;
++	private static KeyboardState previousState;
+ 
+-	private const int DLGC_WANTALLKEYS = 4;
++	private static readonly List<Keys> scratchKeys = new List<Keys>();
+ 
+ 	public static event CharEnteredHandler CharEntered;
+ 
+@@ -39,58 +31,84 @@ public static class KeyboardInput
+ 
+ 	public static event KeyEventHandler KeyUp;
+ 
+-	[DllImport("Imm32.dll", CharSet = CharSet.Unicode)]
+-	private static extern IntPtr ImmGetContext(IntPtr hWnd);
+-
+-	[DllImport("Imm32.dll", CharSet = CharSet.Unicode)]
+-	private static extern IntPtr ImmAssociateContext(IntPtr hWnd, IntPtr hIMC);
+-
+-	[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+-	private static extern IntPtr CallWindowProc(IntPtr lpPrevWndFunc, IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+-
+-	[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+-	private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+-
+ 	public static void Initialize(GameWindow window)
+ 	{
+ 		if (initialized)
+ 		{
+ 			throw new InvalidOperationException("TextInput.Initialize can only be called once!");
+ 		}
+-		hookProcDelegate = HookProc;
+-		prevWndProc = (IntPtr)SetWindowLong(window.Handle, -4, (int)Marshal.GetFunctionPointerForDelegate((Delegate)hookProcDelegate));
+-		hIMC = ImmGetContext(window.Handle);
++		TextInputEXT.WindowHandle = window.Handle;
++		TextInputEXT.TextInput += OnTextInput;
+ 		initialized = true;
+ 	}
+ 
+-	private static IntPtr HookProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
++	/// <summary>Start or stop receiving text (and show or hide the on-screen keyboard where there is one).</summary>
++	public static void SetTextInputActive(bool active)
++	{
++		if (!initialized || active == textInputActive)
++		{
++			return;
++		}
++		textInputActive = active;
++		if (active)
++		{
++			TextInputEXT.StartTextInput();
++		}
++		else
++		{
++			TextInputEXT.StopTextInput();
++			if (VitaPlatform.IsVita) VitaPlatform.vita_port_cancel_ime();
++		}
++	}
++
++	/// <summary>Port: once the Vita's system keyboard has closed (and its text was delivered), release its text box so Cross opens the keyboard again.</summary>
++	public static void ReleaseClosedScreenKeyboard()
++	{
++		if (VitaPlatform.IsVita && textInputActive && !TextInputEXT.IsScreenKeyboardShown())
++		{
++			Game1.keyboardDispatcher.Subscriber = null;
++			SetTextInputActive(false);
++		}
++	}
++
++	/// <summary>Raise <see cref="KeyDown" /> and <see cref="KeyUp" /> for keys whose state changed since the last call.</summary>
++	public static void Update(KeyboardState state)
+ 	{
+-		IntPtr returnCode = CallWindowProc(prevWndProc, hWnd, msg, wParam, lParam);
+-		switch (msg)
++		if (!initialized)
+ 		{
+-		case 135u:
+-			returnCode = (IntPtr)(returnCode.ToInt32() | 4);
+-			break;
+-		case 256u:
+-			KeyDown?.Invoke(null, new KeyEventArgs((Keys)(int)wParam));
+-			break;
+-		case 257u:
+-			KeyUp?.Invoke(null, new KeyEventArgs((Keys)(int)wParam));
+-			break;
+-		case 258u:
+-			CharEntered?.Invoke(null, new CharacterEventArgs((char)(int)wParam, lParam.ToInt32()));
+-			break;
+-		case 641u:
+-			if (wParam.ToInt32() == 1)
++			return;
++		}
++		if (KeyDown != null)
++		{
++			scratchKeys.Clear();
++			scratchKeys.AddRange(state.GetPressedKeys());
++			foreach (Keys key in scratchKeys)
+ 			{
+-				ImmAssociateContext(hWnd, hIMC);
++				if (!previousState.IsKeyDown(key))
++				{
++					KeyDown(null, new KeyEventArgs(key));
++				}
+ 			}
+-			break;
+-		case 81u:
+-			ImmAssociateContext(hWnd, hIMC);
+-			returnCode = (IntPtr)1;
+-			break;
+ 		}
+-		return returnCode;
++		if (KeyUp != null)
++		{
++			scratchKeys.Clear();
++			scratchKeys.AddRange(previousState.GetPressedKeys());
++			foreach (Keys key in scratchKeys)
++			{
++				if (!state.IsKeyDown(key))
++				{
++					KeyUp(null, new KeyEventArgs(key));
++				}
++			}
++		}
++		previousState = state;
++	}
++
++	private static void OnTextInput(char character)
++	{
++		// WM_CHAR's lParam (repeat count, scan code...) isn't available; nothing reads it but the
++		// CharacterEventArgs accessors.
++		CharEntered?.Invoke(null, new CharacterEventArgs(character, 0));
+ 	}
+ }

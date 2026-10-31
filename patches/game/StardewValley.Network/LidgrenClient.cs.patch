@@ -1,0 +1,144 @@
+diff --git a/StardewValley.Network/LidgrenClient.cs b/StardewValley.Network/LidgrenClient.cs
+index e4015efb8f7c146a43fd68370b5ec22d7cca5835..74930c992f35285aa095cc12b56ae17859d5cb95 100644
+--- a/StardewValley.Network/LidgrenClient.cs
++++ b/StardewValley.Network/LidgrenClient.cs
+@@ -43,34 +43,34 @@ public class LidgrenClient : HookableClient
+ 
+ 	protected override void connectImpl()
+ 	{
+-		NetPeerConfiguration config = new NetPeerConfiguration("StardewValley");
+-		config.EnableMessageType(NetIncomingMessageType.DiscoveryResponse);
+-		config.EnableMessageType(NetIncomingMessageType.ConnectionLatencyUpdated);
+-		config.ConnectionTimeout = 30f;
+-		config.PingInterval = 5f;
+-		config.MaximumTransmissionUnit = 1200;
+-		client = new NetClient(config);
++		NetPeerConfiguration netPeerConfiguration = new NetPeerConfiguration("StardewValley");
++		netPeerConfiguration.EnableMessageType(NetIncomingMessageType.DiscoveryResponse);
++		netPeerConfiguration.EnableMessageType(NetIncomingMessageType.ConnectionLatencyUpdated);
++		netPeerConfiguration.ConnectionTimeout = 30f;
++		netPeerConfiguration.PingInterval = 5f;
++		netPeerConfiguration.MaximumTransmissionUnit = 1200;
++		client = new NetClient(netPeerConfiguration);
+ 		client.Start();
+ 		attemptConnection();
+ 	}
+ 
+ 	private void attemptConnection()
+ 	{
+-		int port = 24642;
++		int serverPort = 24642;
+ 		if (address.Contains(':'))
+ 		{
+-			string[] split = address.Split(':');
+-			address = split[0];
++			string[] array = address.Split(':');
++			address = array[0];
+ 			try
+ 			{
+-				port = Convert.ToInt32(split[1]);
++				serverPort = Convert.ToInt32(array[1]);
+ 			}
+ 			catch (Exception)
+ 			{
+-				port = 24642;
++				serverPort = 24642;
+ 			}
+ 		}
+-		client.DiscoverKnownPeer(address, port);
++		client.DiscoverKnownPeer(address, serverPort);
+ 		lastAttemptMs = DateTime.UtcNow.TimeOfDay.TotalMilliseconds;
+ 	}
+ 
+@@ -105,45 +105,45 @@ public class LidgrenClient : HookableClient
+ 			attemptConnection();
+ 			retryAttempts++;
+ 		}
+-		NetIncomingMessage inc;
+-		while ((inc = client.ReadMessage()) != null)
++		NetIncomingMessage netIncomingMessage;
++		while ((netIncomingMessage = client.ReadMessage()) != null)
+ 		{
+-			switch (inc.MessageType)
++			switch (netIncomingMessage.MessageType)
+ 			{
+ 			case NetIncomingMessageType.ConnectionLatencyUpdated:
+-				readLatency(inc);
++				readLatency(netIncomingMessage);
+ 				break;
+ 			case NetIncomingMessageType.DiscoveryResponse:
+ 				if (!serverDiscovered)
+ 				{
+-					Game1.log.Verbose("Found server at " + inc.SenderEndPoint);
+-					string protocolVersion = inc.ReadString();
+-					if (validateProtocol(protocolVersion))
++					Game1.log.Verbose("Found server at " + netIncomingMessage.SenderEndPoint);
++					string text2 = netIncomingMessage.ReadString();
++					if (validateProtocol(text2))
+ 					{
+-						serverName = inc.ReadString();
+-						receiveHandshake(inc);
++						serverName = netIncomingMessage.ReadString();
++						receiveHandshake(netIncomingMessage);
+ 						serverDiscovered = true;
+ 						break;
+ 					}
+-					Game1.log.Warn("Failed to connect. The server's protocol (" + protocolVersion + ") does not match our own (" + Multiplayer.protocolVersion + ").");
++					Game1.log.Warn("Failed to connect. The server's protocol (" + text2 + ") does not match our own (" + Multiplayer.protocolVersion + ").");
+ 					connectionMessage = Game1.content.LoadString("Strings\\UI:CoopMenu_FailedProtocolVersion");
+ 					client.Disconnect("");
+ 				}
+ 				break;
+ 			case NetIncomingMessageType.Data:
+-				parseDataMessageFromServer(inc);
++				parseDataMessageFromServer(netIncomingMessage);
+ 				break;
+ 			case NetIncomingMessageType.DebugMessage:
+ 			case NetIncomingMessageType.WarningMessage:
+ 			case NetIncomingMessageType.ErrorMessage:
+ 			{
+-				string message = inc.ReadString();
+-				Game1.log.Verbose(string.Concat(inc.MessageType, ": ", message));
+-				Game1.debugOutput = message;
++				string text = netIncomingMessage.ReadString();
++				Game1.log.Verbose(string.Concat(netIncomingMessage.MessageType, ": ", text));
++				Game1.debugOutput = text;
+ 				break;
+ 			}
+ 			case NetIncomingMessageType.StatusChanged:
+-				statusChanged(inc);
++				statusChanged(netIncomingMessage);
+ 				break;
+ 			}
+ 		}
+@@ -161,11 +161,11 @@ public class LidgrenClient : HookableClient
+ 
+ 	private void statusChanged(NetIncomingMessage message)
+ 	{
+-		NetConnectionStatus status = (NetConnectionStatus)message.ReadByte();
+-		if (status == NetConnectionStatus.Disconnected || status == NetConnectionStatus.Disconnecting)
++		NetConnectionStatus netConnectionStatus = (NetConnectionStatus)message.ReadByte();
++		if (netConnectionStatus == NetConnectionStatus.Disconnected || netConnectionStatus == NetConnectionStatus.Disconnecting)
+ 		{
+-			string byeMessage = message.ReadString();
+-			clientRemotelyDisconnected(status, byeMessage);
++			string message2 = message.ReadString();
++			clientRemotelyDisconnected(netConnectionStatus, message2);
+ 		}
+ 	}
+ 
+@@ -191,10 +191,10 @@ public class LidgrenClient : HookableClient
+ 
+ 	protected virtual void sendMessageImpl(OutgoingMessage message)
+ 	{
+-		NetOutgoingMessage sendMsg = client.CreateMessage();
+-		LidgrenMessageUtils.WriteMessage(message, sendMsg);
+-		client.SendMessage(sendMsg, NetDeliveryMethod.ReliableOrdered);
+-		bandwidthLogger?.RecordBytesUp(sendMsg.LengthBytes);
++		NetOutgoingMessage netOutgoingMessage = client.CreateMessage();
++		LidgrenMessageUtils.WriteMessage(message, netOutgoingMessage);
++		client.SendMessage(netOutgoingMessage, NetDeliveryMethod.ReliableOrdered);
++		bandwidthLogger?.RecordBytesUp(netOutgoingMessage.LengthBytes);
+ 	}
+ 
+ 	public override void sendMessage(OutgoingMessage message)

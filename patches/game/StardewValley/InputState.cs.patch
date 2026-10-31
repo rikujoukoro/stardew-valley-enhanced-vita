@@ -1,0 +1,259 @@
+diff --git a/StardewValley/InputState.cs b/StardewValley/InputState.cs
+index 0e1b29f46e36dc7b7f46de2e5b261995a86bb6c2..822c163ef25f041afad930cc4522c7b7d5ab5b1d 100644
+--- a/StardewValley/InputState.cs
++++ b/StardewValley/InputState.cs
+@@ -1,3 +1,4 @@
++using System;
+ using System.Collections.Generic;
+ using Microsoft.Xna.Framework;
+ using Microsoft.Xna.Framework.Input;
+@@ -7,6 +8,13 @@ namespace StardewValley;
+ public class InputState
+ {
+ 	protected Point _simulatedMousePosition = Point.Zero;
++	private static bool _vitaTouchPressed;
++	private static bool _vitaTouchDragging;
++	private static bool _vitaTouchTapPending;
++	private static int _vitaTouchStartY;
++	private static int _vitaTouchLastY;
++	private static int _vitaTouchScrollRemainder;
++	private static int _vitaTouchScrollWheelValue;
+ 
+ 	protected List<Keys> _ignoredKeys = new List<Keys>();
+ 
+@@ -25,10 +33,74 @@ public class InputState
+ 	public virtual void UpdateStates()
+ 	{
+ 		_currentKeyboardState = Keyboard.GetState();
+-		_currentMouseState = Mouse.GetState();
++		if (VitaPlatform.IsVita)
++		{
++			bool inMenu = (Game1.activeClickableMenu != null || Game1.emoteMenu != null || Game1.gameMode == 0);
++			ButtonState leftBtn = ButtonState.Released;
++			int tx = 0, ty = 0;
++			bool touchPresent = inMenu && VitaPlatform.ReadFrontTouch(out tx, out ty);
++			if (touchPresent)
++			{
++				_simulatedMousePosition.X = tx;
++				_simulatedMousePosition.Y = ty;
++				if (!_vitaTouchPressed)
++				{
++					_vitaTouchPressed = true;
++					_vitaTouchDragging = false;
++					_vitaTouchStartY = ty;
++					_vitaTouchLastY = ty;
++					_vitaTouchScrollRemainder = 0;
++				}
++				else
++				{
++					int deltaY = ty - _vitaTouchLastY;
++					_vitaTouchLastY = ty;
++					if (!_vitaTouchDragging && Math.Abs(ty - _vitaTouchStartY) >= 14)
++					{
++						_vitaTouchDragging = true;
++						deltaY = ty - _vitaTouchStartY;
++						_vitaTouchScrollRemainder = 0;
++					}
++					if (_vitaTouchDragging)
++					{
++						_vitaTouchScrollRemainder += deltaY;
++						while (_vitaTouchScrollRemainder >= 24)
++						{
++							_vitaTouchScrollWheelValue += 120;
++							_vitaTouchScrollRemainder -= 24;
++						}
++						while (_vitaTouchScrollRemainder <= -24)
++						{
++							_vitaTouchScrollWheelValue -= 120;
++							_vitaTouchScrollRemainder += 24;
++						}
++					}
++				}
++			}
++			else if (_vitaTouchPressed)
++			{
++				_vitaTouchTapPending = inMenu && !_vitaTouchDragging;
++				_vitaTouchPressed = false;
++				_vitaTouchDragging = false;
++			}
++			if (_vitaTouchTapPending)
++			{
++				leftBtn = ButtonState.Pressed;
++				_vitaTouchTapPending = false;
++			}
++			_currentMouseState = new MouseState(_simulatedMousePosition.X, _simulatedMousePosition.Y, _vitaTouchScrollWheelValue, leftBtn, ButtonState.Released, ButtonState.Released, ButtonState.Released, ButtonState.Released);
++		}
++		else
++		{
++			_currentMouseState = Mouse.GetState();
++		}
+ 		if (Game1.playerOneIndex >= PlayerIndex.One)
+ 		{
+ 			_currentGamepadState = GamePad.GetState(Game1.playerOneIndex);
++			if (VitaPlatform.IsVita)
++			{
++				_currentGamepadState = MapVitaButtons(_currentGamepadState);
++			}
+ 		}
+ 		else
+ 		{
+@@ -36,6 +108,146 @@ public class InputState
+ 		}
+ 	}
+ 
++	/// <summary>Port: the buttons MapVitaButtons carries over when it rebuilds the pad state. The D-pad is among them: FNA's
++	/// IsButtonDown reads the button bits, not the DPad field, so without them the D-pad read as released while L or R was
++	/// held (L + R + right never switched the camera).</summary>
++	private static readonly Buttons[] VitaButtons = new Buttons[14]
++	{
++		Buttons.A,
++		Buttons.B,
++		Buttons.X,
++		Buttons.Y,
++		Buttons.Back,
++		Buttons.Start,
++		Buttons.LeftShoulder,
++		Buttons.RightShoulder,
++		Buttons.LeftStick,
++		Buttons.RightStick,
++		Buttons.DPadUp,
++		Buttons.DPadDown,
++		Buttons.DPadLeft,
++		Buttons.DPadRight
++	};
++
++	/// <summary>Port: the Vita has no L2/R2; as in the official Vita release, tapping the touch screen's bottom corners shifts the toolbar.</summary>
++	/// <remarks>
++	/// A tap in the bottom-left corner is LT, in the bottom-right corner RT, pressed for one frame; the rear
++	/// touchpad does nothing, as in the official release. Triggers of a pad that
++	/// has them (DualShock on a PS TV) still work. Every other button is the same as on a controller:
++	/// Cross check, Circle cancel/menu, Square use tool, Triangle crafting, L/R swap tool, Select journal.
++	/// </remarks>
++	/// <summary>Port: when L / R went down (Stopwatch ticks), 0 while up.</summary>
++	private static long _vitaLeftHeldSince;
++
++	private static long _vitaRightHeldSince;
++
++	/// <summary>Port: how many repeat gaps L / R have had in the current hold.</summary>
++	private static long _vitaLeftGaps;
++
++	private static long _vitaRightGaps;
++
++	/// <summary>Port: whether a held L or R reads as released this poll: in menus, from 0.4 s held on, one poll in each 0.15 s, so the press repeats (the poll after it reads as pressed again).</summary>
++	private static bool VitaHeldRepeatGap(ref long heldSince, ref long gaps, bool inMenu)
++	{
++		long now = System.Diagnostics.Stopwatch.GetTimestamp();
++		if (heldSince == 0)
++		{
++			heldSince = now;
++			gaps = 0;
++			return false;
++		}
++		if (!inMenu)
++		{
++			return false;
++		}
++		long frequency = System.Diagnostics.Stopwatch.Frequency;
++		long held = now - heldSince - frequency * 4 / 10;
++		if (held < 0)
++		{
++			return false;
++		}
++		long due = held / (frequency * 15 / 100) + 1;
++		if (due > gaps)
++		{
++			gaps = due;
++			return true;
++		}
++		return false;
++	}
++
++	private GamePadState MapVitaButtons(GamePadState raw)
++	{
++		int taps = VitaPlatform.ReadRearTouchTaps();
++		// In play L/R shift the toolbar and the screen corners swap the tool; in menus L/R change tabs as on a controller.
++		// Menus too: their tabs change with LT/RT, so L/R must reach them as triggers there as well.
++		bool inPlay = true;
++		bool shouldersPressed = raw.IsButtonDown(Buttons.LeftShoulder) || raw.IsButtonDown(Buttons.RightShoulder);
++		if (!raw.IsButtonDown(Buttons.LeftShoulder))
++		{
++			_vitaLeftHeldSince = 0;
++		}
++		if (!raw.IsButtonDown(Buttons.RightShoulder))
++		{
++			_vitaRightHeldSince = 0;
++		}
++		if (!raw.IsConnected || (taps == 0 && !(inPlay && shouldersPressed)))
++		{
++			return raw;
++		}
++		Buttons buttons = (Buttons)0;
++		foreach (Buttons button in VitaButtons)
++		{
++			if (raw.IsButtonDown(button))
++			{
++				buttons |= button;
++			}
++		}
++		float leftTrigger = raw.Triggers.Left;
++		float rightTrigger = raw.Triggers.Right;
++		if (inPlay)
++		{
++			// In menus a held L or R repeats (a new press now and then), so tabs and pages keep turning.
++			bool inMenu = Game1.activeClickableMenu != null;
++			if ((buttons & Buttons.LeftShoulder) != 0 && !VitaHeldRepeatGap(ref _vitaLeftHeldSince, ref _vitaLeftGaps, inMenu))
++			{
++				leftTrigger = 1f;
++			}
++			if ((buttons & Buttons.RightShoulder) != 0 && !VitaHeldRepeatGap(ref _vitaRightHeldSince, ref _vitaRightGaps, inMenu))
++			{
++				rightTrigger = 1f;
++			}
++			if ((buttons & Buttons.LeftShoulder) == 0)
++			{
++				_vitaLeftHeldSince = 0;
++			}
++			if ((buttons & Buttons.RightShoulder) == 0)
++			{
++				_vitaRightHeldSince = 0;
++			}
++			buttons &= ~(Buttons.LeftShoulder | Buttons.RightShoulder);
++			if ((taps & 1) != 0)
++			{
++				buttons |= Buttons.LeftShoulder;
++			}
++			if ((taps & 2) != 0)
++			{
++				buttons |= Buttons.RightShoulder;
++			}
++		}
++		else
++		{
++			if ((taps & 1) != 0)
++			{
++				leftTrigger = 1f;
++			}
++			if ((taps & 2) != 0)
++			{
++				rightTrigger = 1f;
++			}
++		}
++		return new GamePadState(raw.ThumbSticks, new GamePadTriggers(leftTrigger, rightTrigger), new GamePadButtons(buttons), raw.DPad);
++	}
++
+ 	public virtual void Update()
+ 	{
+ 	}
+@@ -98,6 +310,12 @@ public class InputState
+ 			_simulatedMousePosition.X = x;
+ 			_simulatedMousePosition.Y = y;
+ 		}
++		else if (VitaPlatform.IsVita)
++		{
++			_simulatedMousePosition.X = x;
++			_simulatedMousePosition.Y = y;
++			_currentMouseState = new MouseState(x, y, _currentMouseState.ScrollWheelValue, ButtonState.Released, ButtonState.Released, ButtonState.Released, ButtonState.Released, ButtonState.Released);
++		}
+ 		else
+ 		{
+ 			Mouse.SetPosition(x, y);

@@ -1,0 +1,41 @@
+diff --git a/xTile.ObjectModel/Component.cs b/xTile.ObjectModel/Component.cs
+index 2db4628411e40c210f74961ae86755a775aeccfa..3ad5c1ef9af0a44428400daada38416a62a7039f 100644
+--- a/xTile.ObjectModel/Component.cs
++++ b/xTile.ObjectModel/Component.cs
+@@ -20,18 +20,33 @@ public abstract class Component
+ 		}
+ 	}
+ 
+-	public virtual IPropertyCollection Properties => m_propertyCollection;
++	// Port: the collection is created on first use. Every tile of every map read at load time used to allocate
++	// one, and almost none ever get a property (tens of thousands of tiles per map, ~80 bytes each).
++	public virtual IPropertyCollection Properties
++	{
++		get
++		{
++			PropertyCollection collection = m_propertyCollection;
++			if (collection == null)
++			{
++				collection = new PropertyCollection();
++				collection = System.Threading.Interlocked.CompareExchange(ref m_propertyCollection, collection, null) ?? collection;
++			}
++			return collection;
++		}
++	}
++
++	/// <summary>Port: the properties for reading, without creating the collection: null when there are none. Reads through <see cref="Properties" /> gave every tile they touched a collection for good.</summary>
++	public IPropertyCollection PropertiesIfAny => m_propertyCollection;
+ 
+ 	public Component()
+ 	{
+ 		m_id = Guid.NewGuid().ToString();
+-		m_propertyCollection = new PropertyCollection();
+ 	}
+ 
+ 	public Component(string id)
+ 	{
+ 		m_id = id;
+-		m_propertyCollection = new PropertyCollection();
+ 	}
+ 
+ 	public override string ToString()

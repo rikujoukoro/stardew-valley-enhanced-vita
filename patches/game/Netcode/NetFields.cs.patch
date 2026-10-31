@@ -1,0 +1,94 @@
+diff --git a/Netcode/NetFields.cs b/Netcode/NetFields.cs
+index 7231b0e21147fe3535fa03bddc9302cc3a839635..722d3728c3c0df8c150b477532674c1b19da6729 100644
+--- a/Netcode/NetFields.cs
++++ b/Netcode/NetFields.cs
+@@ -13,13 +13,25 @@ public class NetFields : AbstractNetSerializable
+ 
+ 	private readonly List<INetSerializable> fields = new List<INetSerializable>();
+ 
+-	public new string Name { get; }
++	private readonly string name;
++
++	/// <summary>The collection's own name (e.g. "Item"). Being added to another collection doesn't rename it.</summary>
++	public override string Name
++	{
++		get
++		{
++			return name;
++		}
++		set
++		{
++		}
++	}
+ 
+ 	public INetObject<NetFields> Owner { get; private set; }
+ 
+ 	public NetFields(string name)
+ 	{
+-		Name = name;
++		this.name = name;
+ 	}
+ 
+ 	public NetFields SetOwner(INetObject<NetFields> owner)
+@@ -44,6 +56,21 @@ public class NetFields : AbstractNetSerializable
+ 		return fields;
+ 	}
+ 
++	public bool HasDirtyFields
++	{
++		get
++		{
++			for (int i = 0; i < fields.Count; i++)
++			{
++				if (fields[i].Dirty)
++				{
++					return true;
++				}
++			}
++			return false;
++		}
++	}
++
+ 	public void CancelInterpolation()
+ 	{
+ 		foreach (INetSerializable field in fields)
+@@ -57,18 +84,19 @@ public class NetFields : AbstractNetSerializable
+ 
+ 	public NetFields AddField(INetSerializable field, [CallerArgumentExpression("field")] string name = null)
+ 	{
+-		name = name ?? field.GetType().FullName;
++		// Port: the name is only used by the error messages below; resolving it eagerly cost a Type.FullName
++		// (generic-parameter walk and string build) per field of every Item/Object/NPC built while loading a save.
+ 		if (Owner == null)
+ 		{
+-			NetHelper.LogWarning("Field '" + name + "' was added to the '" + Name + "' net fields before SetOwner was called.");
++			NetHelper.LogWarning("Field '" + (name ?? field.GetType().FullName) + "' was added to the '" + Name + "' net fields before SetOwner was called.");
+ 		}
+ 		if (field.Parent != null)
+ 		{
+-			throw new InvalidOperationException("Can't add field '" + name + "' to the '" + Name + "' net fields because it's already part of the " + field.Parent.Name + " tree.");
++			throw new InvalidOperationException("Can't add field '" + (name ?? field.GetType().FullName) + "' to the '" + Name + "' net fields because it's already part of the " + field.Parent.Name + " tree.");
+ 		}
+ 		if (Parent != null)
+ 		{
+-			throw new InvalidOperationException("Can't add field '" + name + "' to the '" + Name + "' net fields, because they've already been added to a tree.");
++			throw new InvalidOperationException("Can't add field '" + (name ?? field.GetType().FullName) + "' to the '" + Name + "' net fields, because they've already been added to a tree.");
+ 		}
+ 		if (ShouldValidateNetFields)
+ 		{
+@@ -76,12 +104,13 @@ public class NetFields : AbstractNetSerializable
+ 			{
+ 				if (field == otherField)
+ 				{
+-					NetHelper.LogWarning("Field '" + name + "' was added to the '" + Name + "' net fields multiple times.");
++					NetHelper.LogWarning("Field '" + (name ?? field.GetType().FullName) + "' was added to the '" + Name + "' net fields multiple times.");
+ 					break;
+ 				}
+ 			}
+ 		}
+-		field.Name = Name + ": " + name;
++		// Lite Netcode: the original stored Name + ": " + name on every field of every instance
++		// (~9.5 MB of strings for a fresh save). Field names are only used in error messages.
+ 		fields.Add(field);
+ 		return this;
+ 	}

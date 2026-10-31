@@ -1,0 +1,269 @@
+diff --git a/Netcode/AbstractNetSerializable.cs b/Netcode/AbstractNetSerializable.cs
+index fe3f45e973b8b8be1f644e6e13590cb4b34ebf74..e7669f8e8b05edb253d62c3c84a6b752555ab69c 100644
+--- a/Netcode/AbstractNetSerializable.cs
++++ b/Netcode/AbstractNetSerializable.cs
+@@ -3,19 +3,21 @@ using System.IO;
+ 
+ namespace Netcode;
+ 
++// Lite Netcode (single-player build): same public API as the original, but per-instance state is
++// reduced on the single-player path. Dirty timing uses one bit; change version vectors are lazy
++// but retained for co-op conflict ordering. Delta aggregation and per-field debug names remain slim.
+ public abstract class AbstractNetSerializable : INetSerializable, INetObject<INetSerializable>
+ {
+-	private uint dirtyTick = uint.MaxValue;
+-
+-	private uint minNextDirtyTime;
+-
+-	protected NetVersion ChangeVersion;
+-
+-	public ushort DeltaAggregateTicks;
+-
+-	private bool needsTick;
++	[Flags]
++	private enum State : byte
++	{
++		None = 0,
++		Dirty = 1,
++		NeedsTick = 2,
++		ChildNeedsTick = 4
++	}
+ 
+-	private bool childNeedsTick;
++	private State state;
+ 
+ 	private INetSerializable parent;
+ 
+@@ -23,34 +25,53 @@ public abstract class AbstractNetSerializable : INetSerializable, INetObject<INe
+ 	{
+ 		get
+ 		{
+-			return dirtyTick;
++			if ((state & State.Dirty) == 0)
++			{
++				return uint.MaxValue;
++			}
++			return 0u;
+ 		}
+ 		set
+ 		{
+-			if (value < dirtyTick)
++			if (value == uint.MaxValue)
+ 			{
+-				SetDirtySooner(value);
++				SetDirtyLater(value);
+ 			}
+-			else if (value > dirtyTick)
++			else
+ 			{
+-				SetDirtyLater(value);
++				SetDirtySooner(value);
+ 			}
+ 		}
+ 	}
+ 
+-	public virtual bool Dirty => dirtyTick != uint.MaxValue;
++	public virtual bool Dirty => (state & State.Dirty) != 0;
++
++	/// <summary>Unused in single-player; kept for API compatibility.</summary>
++	public ushort DeltaAggregateTicks
++	{
++		get
++		{
++			return 0;
++		}
++		set
++		{
++		}
++	}
++
++	// The vector allocates only when receiving network data or dirtied in a connected root.
++	protected NetVersion ChangeVersion;
+ 
+ 	public bool NeedsTick
+ 	{
+ 		get
+ 		{
+-			return needsTick;
++			return (state & State.NeedsTick) != 0;
+ 		}
+ 		set
+ 		{
+-			if (value != needsTick)
++			if (value != NeedsTick)
+ 			{
+-				needsTick = value;
++				SetState(State.NeedsTick, value);
+ 				if (value && Parent != null)
+ 				{
+ 					Parent.ChildNeedsTick = true;
+@@ -63,13 +84,13 @@ public abstract class AbstractNetSerializable : INetSerializable, INetObject<INe
+ 	{
+ 		get
+ 		{
+-			return childNeedsTick;
++			return (state & State.ChildNeedsTick) != 0;
+ 		}
+ 		set
+ 		{
+-			if (value != childNeedsTick)
++			if (value != ChildNeedsTick)
+ 			{
+-				childNeedsTick = value;
++				SetState(State.ChildNeedsTick, value);
+ 				if (value && Parent != null)
+ 				{
+ 					Parent.ChildNeedsTick = true;
+@@ -78,7 +99,17 @@ public abstract class AbstractNetSerializable : INetSerializable, INetObject<INe
+ 		}
+ 	}
+ 
+-	public string Name { get; set; }
++	/// <summary>Debug name. Not stored for individual fields; <see cref="NetFields" /> keeps its own.</summary>
++	public virtual string Name
++	{
++		get
++		{
++			return null;
++		}
++		set
++		{
++		}
++	}
+ 
+ 	public INetRoot Root { get; protected set; }
+ 
+@@ -96,6 +127,18 @@ public abstract class AbstractNetSerializable : INetSerializable, INetObject<INe
+ 
+ 	public INetSerializable NetFields => this;
+ 
++	private void SetState(State flag, bool on)
++	{
++		if (on)
++		{
++			state |= flag;
++		}
++		else
++		{
++			state &= ~flag;
++		}
++	}
++
+ 	public void ResetNewestReceivedChangeVersion()
+ 	{
+ 		ChangeVersion.Clear();
+@@ -103,65 +146,44 @@ public abstract class AbstractNetSerializable : INetSerializable, INetObject<INe
+ 
+ 	protected void SetDirtySooner(uint tick)
+ 	{
+-		tick = Math.Max(tick, minNextDirtyTime);
+-		if (dirtyTick > tick)
++		if ((state & State.Dirty) == 0)
+ 		{
+-			dirtyTick = tick;
+-			if (Parent != null)
++			state |= State.Dirty;
++			if (Root != null && Root.Clock.netVersion.Size() > 1)
+ 			{
+-				Parent.DirtyTick = Math.Min(Parent.DirtyTick, tick);
+-			}
+-			if (Root != null)
+-			{
+-				minNextDirtyTime = Root.Clock.GetLocalTick() + DeltaAggregateTicks;
+ 				ChangeVersion.Set(Root.Clock.netVersion);
+ 			}
+ 			else
+ 			{
+-				minNextDirtyTime = 0u;
+ 				ChangeVersion.Clear();
+ 			}
++			if (Parent != null)
++			{
++				Parent.DirtyTick = 0u;
++			}
+ 		}
+ 	}
+ 
+ 	protected void SetDirtyLater(uint tick)
+ 	{
+-		if (dirtyTick < tick)
++		if (tick == uint.MaxValue && (state & State.Dirty) != 0)
+ 		{
+-			dirtyTick = tick;
++			state &= ~State.Dirty;
+ 			ForEachChild((INetSerializable child) =>
+ 			{
+-				child.DirtyTick = Math.Max(child.DirtyTick, tick);
++				child.DirtyTick = uint.MaxValue;
+ 			});
+-			if (tick == uint.MaxValue)
+-			{
+-				CleanImpl();
+-			}
++			CleanImpl();
+ 		}
+ 	}
+ 
+ 	protected virtual void CleanImpl()
+ 	{
+-		if (Root == null)
+-		{
+-			minNextDirtyTime = 0u;
+-		}
+-		else
+-		{
+-			minNextDirtyTime = Root.Clock.GetLocalTick() + DeltaAggregateTicks;
+-		}
+ 	}
+ 
+ 	public void MarkDirty()
+ 	{
+-		if (Root == null)
+-		{
+-			SetDirtySooner(0u);
+-		}
+-		else
+-		{
+-			SetDirtySooner(Root.Clock.GetLocalTick());
+-		}
++		SetDirtySooner(0u);
+ 	}
+ 
+ 	public void MarkClean()
+@@ -176,13 +198,16 @@ public abstract class AbstractNetSerializable : INetSerializable, INetObject<INe
+ 
+ 	public bool Tick()
+ 	{
++		bool needsTick = NeedsTick;
+ 		if (needsTick)
+ 		{
+ 			needsTick = tickImpl();
++			SetState(State.NeedsTick, needsTick);
+ 		}
+-		if (childNeedsTick)
++		bool childNeedsTick = false;
++		if (ChildNeedsTick)
+ 		{
+-			childNeedsTick = false;
++			SetState(State.ChildNeedsTick, on: false);
+ 			ForEachChild((INetSerializable child) =>
+ 			{
+ 				if (child.NeedsTick || child.ChildNeedsTick)
+@@ -190,6 +215,9 @@ public abstract class AbstractNetSerializable : INetSerializable, INetObject<INe
+ 					childNeedsTick |= child.Tick();
+ 				}
+ 			});
++			// A child may have set our ChildNeedsTick again while ticking; keep that, as the original did.
++			childNeedsTick |= ChildNeedsTick;
++			SetState(State.ChildNeedsTick, childNeedsTick);
+ 		}
+ 		return childNeedsTick | needsTick;
+ 	}
+@@ -235,7 +263,6 @@ public abstract class AbstractNetSerializable : INetSerializable, INetObject<INe
+ 		}
+ 		MarkClean();
+ 		ChangeVersion.Clear();
+-		minNextDirtyTime = 0u;
+ 	}
+ 
+ 	protected virtual void SetChildParents()

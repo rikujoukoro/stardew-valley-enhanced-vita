@@ -1,0 +1,50 @@
+diff --git a/src/Graphics/SpriteBatch.cs b/src/Graphics/SpriteBatch.cs
+index b60a0f4..5ea679c 100644
+--- a/src/Graphics/SpriteBatch.cs
++++ b/src/Graphics/SpriteBatch.cs
+@@ -1618,13 +1618,24 @@ namespace Microsoft.Xna.Framework.Graphics
+ 
+ 		#region Private Sprite Comparison Classes
+ 
++		/* Stardew Valley port: ties keep their submission order. Array.Sort is unstable and the runtimes
++		 * break ties differently, so on Mono sprites drawn at the same depth after a menu background
++		 * (text boxes, labels) ended up under it. The entries point into spriteInfos, which is in
++		 * submission order, so comparing the pointers orders the ties by submission.
++		 */
++		private static int SubmissionOrder(IntPtr i1, IntPtr i2)
++		{
++			return ((long) i1).CompareTo((long) i2);
++		}
++
+ 		private class TextureComparer : IComparer<IntPtr>
+ 		{
+ 			public unsafe int Compare(IntPtr i1, IntPtr i2)
+ 			{
+ 				SpriteInfo* p1 = (SpriteInfo*) i1;
+ 				SpriteInfo* p2 = (SpriteInfo*) i2;
+-				return p1->textureHash.CompareTo(p2->textureHash);
++				int result = p1->textureHash.CompareTo(p2->textureHash);
++				return result != 0 ? result : SubmissionOrder(i1, i2);
+ 			}
+ 		}
+ 
+@@ -1634,7 +1645,8 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			{
+ 				SpriteInfo* p1 = (SpriteInfo*) i1;
+ 				SpriteInfo* p2 = (SpriteInfo*) i2;
+-				return p2->depth.CompareTo(p1->depth);
++				int result = p2->depth.CompareTo(p1->depth);
++				return result != 0 ? result : SubmissionOrder(i1, i2);
+ 			}
+ 		}
+ 
+@@ -1644,7 +1656,8 @@ namespace Microsoft.Xna.Framework.Graphics
+ 			{
+ 				SpriteInfo* p1 = (SpriteInfo*) i1;
+ 				SpriteInfo* p2 = (SpriteInfo*) i2;
+-				return p1->depth.CompareTo(p2->depth);
++				int result = p1->depth.CompareTo(p2->depth);
++				return result != 0 ? result : SubmissionOrder(i1, i2);
+ 			}
+ 		}
+ 

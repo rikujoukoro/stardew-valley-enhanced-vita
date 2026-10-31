@@ -1,0 +1,350 @@
+diff --git a/StardewValley/Options.cs b/StardewValley/Options.cs
+index 3dff16eff305c386c5964436326f35f819118d85..c26be10079933a06244ff1dbf517b780cfa696c8 100644
+--- a/StardewValley/Options.cs
++++ b/StardewValley/Options.cs
+@@ -3,14 +3,12 @@ using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
+ using System.Reflection;
+-using System.Windows.Forms;
+ using System.Xml;
+ using System.Xml.Serialization;
+ using Microsoft.Xna.Framework.Graphics;
+ using Microsoft.Xna.Framework.Input;
+ using StardewValley.BellsAndWhistles;
+ using StardewValley.Menus;
+-using StardewValley.SDKs.Steam;
+ using StardewValley.SaveSerialization;
+ 
+ namespace StardewValley;
+@@ -481,6 +479,10 @@ public class Options
+ 	{
+ 		get
+ 		{
++			if (VitaPlatform.IsVita)
++			{
++				return VitaPlatform.BaseZoomLevel;
++			}
+ 			if (LocalMultiplayer.IsLocalMultiplayer() || !Game1.game1.IsMainInstance)
+ 			{
+ 				return localCoopBaseZoomLevel;
+@@ -489,7 +491,11 @@ public class Options
+ 		}
+ 		set
+ 		{
+-			if (LocalMultiplayer.IsLocalMultiplayer() || !Game1.game1.IsMainInstance)
++			if (VitaPlatform.IsVita)
++			{
++				// Fixed on the Vita; zoom buttons and debug commands can't change it.
++			}
++			else if (LocalMultiplayer.IsLocalMultiplayer() || !Game1.game1.IsMainInstance)
+ 			{
+ 				localCoopBaseZoomLevel = value;
+ 			}
+@@ -505,6 +511,10 @@ public class Options
+ 	{
+ 		get
+ 		{
++			if (VitaPlatform.IsVita)
++			{
++				return VitaPlatform.BaseUIScale;
++			}
+ 			if (Game1.gameMode != 3)
+ 			{
+ 				return 1f;
+@@ -517,7 +527,7 @@ public class Options
+ 		}
+ 		set
+ 		{
+-			if (Game1.gameMode == 3)
++			if (Game1.gameMode == 3 && !VitaPlatform.IsVita)
+ 			{
+ 				if (LocalMultiplayer.IsLocalMultiplayer() || !Game1.game1.IsMainInstance)
+ 				{
+@@ -545,10 +555,6 @@ public class Options
+ 			case ItemStowingModes.GamepadOnly:
+ 				if (gamepadControls)
+ 				{
+-					if (Program.sdk is SteamHelper steamHelper && steamHelper.IsRunningOnSteamDeck() && Game1.input.GetMouseState().LeftButton == Microsoft.Xna.Framework.Input.ButtonState.Pressed)
+-					{
+-						return false;
+-					}
+ 					return true;
+ 				}
+ 				return false;
+@@ -586,16 +592,7 @@ public class Options
+ 		{
+ 			return;
+ 		}
+-		Options default_options = null;
+-		string filePath = GetFilePathForDefaultOptions();
+-		try
+-		{
+-			using FileStream stream = File.Open(filePath, FileMode.Open);
+-			default_options = defaultSettingsSerializer.DeserializeFast(stream) as Options;
+-		}
+-		catch (Exception)
+-		{
+-		}
++		Options default_options = ReadDefaultOptionsFile();
+ 		if (default_options == null)
+ 		{
+ 			return;
+@@ -619,6 +616,44 @@ public class Options
+ 		}
+ 	}
+ 
++	/// <summary>Read the default_options file, or null if it's missing or unreadable.</summary>
++	private Options ReadDefaultOptionsFile()
++	{
++		try
++		{
++			using FileStream stream = File.Open(GetFilePathForDefaultOptions(), FileMode.Open);
++			return defaultSettingsSerializer.DeserializeFast(stream) as Options;
++		}
++		catch (Exception)
++		{
++			return null;
++		}
++	}
++
++	/// <summary>Use the volume levels from default_options instead of the ones stored in the save.</summary>
++	/// <remarks>
++	/// Port: the original keeps volume in each save, written only when the day is saved, so a volume
++	/// changed and then quit without sleeping came back as the save's old level on the next load (and
++	/// loading then copied that level into default_options too). Volume is treated as a device
++	/// setting here: the last level set anywhere is kept for every save.
++	/// </remarks>
++	public void ApplyGlobalAudioLevels()
++	{
++		if (!Game1.game1.IsMainInstance)
++		{
++			return;
++		}
++		Options global = ReadDefaultOptionsFile();
++		if (global == null)
++		{
++			return;
++		}
++		musicVolumeLevel = global.musicVolumeLevel;
++		soundVolumeLevel = global.soundVolumeLevel;
++		ambientVolumeLevel = global.ambientVolumeLevel;
++		footstepVolumeLevel = global.footstepVolumeLevel;
++	}
++
+ 	public virtual void SaveDefaultOptions()
+ 	{
+ 		optionsDirty = false;
+@@ -644,6 +679,12 @@ public class Options
+ 
+ 	public void platformClampValues()
+ 	{
++		if (VitaPlatform.IsVita)
++		{
++			// Fixed on the Vita along with the zoom level and UI scale; its options page doesn't offer them.
++			pinToolbarToggle = true;
++			zoomButtons = false;
++		}
+ 	}
+ 
+ 	public Microsoft.Xna.Framework.Input.Keys getFirstKeyboardKeyFromInputButtonList(InputButton[] inputButton)
+@@ -707,7 +748,8 @@ public class Options
+ 		footstepVolumeLevel = 0.9f;
+ 		soundVolumeLevel = 1f;
+ 		dialogueFontScale = 1f;
+-		DisplayMode displayMode = Game1.graphics.GraphicsDevice.Adapter.SupportedDisplayModes.Last();
++		// Port: SDL on the Vita lists no fullscreen display modes; its only mode is the current one.
++		DisplayMode displayMode = Game1.graphics.GraphicsDevice.Adapter.SupportedDisplayModes.LastOrDefault() ?? Game1.graphics.GraphicsDevice.Adapter.CurrentDisplayMode;
+ 		preferredResolutionX = displayMode.Width;
+ 		preferredResolutionY = displayMode.Height;
+ 		vsyncEnabled = true;
+@@ -858,6 +900,21 @@ public class Options
+ 	{
+ 		switch (which)
+ 		{
++		case VitaPlatform.ShakeOption:
++			VitaPlatform.ShakeEnabled = value;
++			break;
++		case VitaPlatform.FewParticlesOption:
++			VitaPlatform.FewParticles = value;
++			break;
++		case VitaPlatform.MinimalDebrisOption:
++			VitaPlatform.MinimalDebris = value;
++			break;
++		case VitaPlatform.AutoAttackOption:
++			VitaPlatform.AutoAttack = value;
++			break;
++		case VitaPlatform.AutoToolOption:
++			VitaPlatform.AutoTool = value;
++			break;
+ 		case 0:
+ 			autoRun = value;
+ 			Game1.player.setRunning(autoRun);
+@@ -1019,6 +1076,10 @@ public class Options
+ 
+ 	public void loadChineseFonts()
+ 	{
++		if (VitaPlatform.IsVita)
++		{
++			useChineseSmoothFont = false;
++		}
+ 		if (useChineseSmoothFont)
+ 		{
+ 			Game1.smallFont = Game1.content.Load<SpriteFont>("Fonts\\Chinese_round\\SmallFont");
+@@ -1178,50 +1239,30 @@ public class Options
+ 
+ 	public void setWindowedOption(int setting)
+ 	{
+-		windowedBorderlessFullscreen = isCurrentlyWindowedBorderless();
+-		fullscreen = !windowedBorderlessFullscreen && Game1.graphics.IsFullScreen;
++		// Port (FNA): the XNA build switched between an exclusive fullscreen device and a maximized
++		// borderless WinForms window. FNA has one fullscreen mode (SDL's borderless fullscreen-desktop),
++		// so "Fullscreen" and "Windowed Borderless" both use it; "Windowed" is a normal, smaller window.
+ 		int whichMode = -1;
+ 		switch (setting)
+ 		{
+ 		case 1:
+-			if (Game1.graphics.IsFullScreen && !windowedBorderlessFullscreen)
+-			{
+-				Game1.toggleNonBorderlessWindowedFullscreen();
+-				fullscreen = false;
+-				windowedBorderlessFullscreen = false;
+-			}
+-			else if (windowedBorderlessFullscreen)
+-			{
+-				fullscreen = false;
+-				windowedBorderlessFullscreen = false;
+-				Game1.toggleFullscreen();
+-			}
++			fullscreen = false;
++			windowedBorderlessFullscreen = false;
++			Game1.SetFullscreen(fullscreen: false);
+ 			whichMode = 1;
+ 			break;
+ 		case 2:
+-			if (windowedBorderlessFullscreen)
+-			{
+-				fullscreen = true;
+-				windowedBorderlessFullscreen = false;
+-				Game1.toggleFullscreen();
+-			}
+-			else if (!Game1.graphics.IsFullScreen)
+-			{
+-				Game1.toggleNonBorderlessWindowedFullscreen();
+-				fullscreen = true;
+-				windowedBorderlessFullscreen = false;
+-				hardwareCursor = false;
+-				Program.gamePtr.IsMouseVisible = false;
+-			}
++			fullscreen = true;
++			windowedBorderlessFullscreen = false;
++			hardwareCursor = false;
++			Program.gamePtr.IsMouseVisible = false;
++			Game1.SetFullscreen(fullscreen: true);
+ 			whichMode = 2;
+ 			break;
+ 		case 0:
+-			if (!windowedBorderlessFullscreen)
+-			{
+-				windowedBorderlessFullscreen = true;
+-				Game1.toggleFullscreen();
+-				fullscreen = false;
+-			}
++			fullscreen = false;
++			windowedBorderlessFullscreen = true;
++			Game1.SetFullscreen(fullscreen: true);
+ 			whichMode = 0;
+ 			break;
+ 		}
+@@ -1239,10 +1280,28 @@ public class Options
+ 		}
+ 	}
+ 
++	/// <summary>Port: the Vita's camera distance (0 Far, 1 Close), from the options or from L + R + right in play.</summary>
++	public static void VitaSetCameraZoom(int zoom)
++	{
++		VitaPlatform.CameraZoom = zoom;
++		Game1.forceSnapOnNextViewportUpdate = true;
++		if (Game1.debrisWeather != null)
++		{
++			Game1.randomizeDebrisWeatherPositions(Game1.debrisWeather);
++		}
++		Game1.randomizeRainPositions();
++	}
++
+ 	public void changeDropDownOption(int which, string value)
+ 	{
+ 		switch (which)
+ 		{
++		case VitaPlatform.CloseZoomOption:
++			VitaSetCameraZoom(VitaPlatform.CameraZoomIndexOf(value));
++			break;
++		case VitaPlatform.FpsLimitOption:
++			VitaPlatform.FpsLimitIndex = VitaPlatform.FpsLimitLabels.IndexOf(value);
++			break;
+ 		case 9:
+ 			setBackgroundMode(value);
+ 			break;
+@@ -1364,6 +1423,21 @@ public class Options
+ 	{
+ 		switch (checkbox.whichOption)
+ 		{
++		case VitaPlatform.ShakeOption:
++			checkbox.isChecked = VitaPlatform.ShakeEnabled;
++			break;
++		case VitaPlatform.FewParticlesOption:
++			checkbox.isChecked = VitaPlatform.FewParticles;
++			break;
++		case VitaPlatform.MinimalDebrisOption:
++			checkbox.isChecked = VitaPlatform.MinimalDebris;
++			break;
++		case VitaPlatform.AutoAttackOption:
++			checkbox.isChecked = VitaPlatform.AutoAttack;
++			break;
++		case VitaPlatform.AutoToolOption:
++			checkbox.isChecked = VitaPlatform.AutoTool;
++			break;
+ 		case 0:
+ 			checkbox.isChecked = autoRun;
+ 			break;
+@@ -1372,9 +1446,9 @@ public class Options
+ 			break;
+ 		case 4:
+ 		{
+-			Form form = Control.FromHandle(Program.gamePtr.Window.Handle).FindForm();
+-			windowedBorderlessFullscreen = form.FormBorderStyle == FormBorderStyle.None;
+-			fullscreen = Game1.graphics.IsFullScreen || windowedBorderlessFullscreen;
++			// FNA: fullscreen is always borderless fullscreen-desktop (see Game1.toggleFullscreen).
++			windowedBorderlessFullscreen = Game1.graphics.IsFullScreen;
++			fullscreen = Game1.graphics.IsFullScreen;
+ 			checkbox.isChecked = fullscreen;
+ 			break;
+ 		}
+@@ -1484,6 +1558,12 @@ public class Options
+ 	{
+ 		switch (plusMinus.whichOption)
+ 		{
++		case VitaPlatform.CloseZoomOption:
++			plusMinus.selected = VitaPlatform.CameraZoom;
++			break;
++		case VitaPlatform.FpsLimitOption:
++			plusMinus.selected = VitaPlatform.FpsLimitIndex;
++			break;
+ 		case 39:
+ 		{
+ 			string currentZoom2 = Math.Round(desiredUIScale * 100f) + "%";
+@@ -2123,12 +2203,8 @@ public class Options
+ 
+ 	public bool isCurrentlyWindowedBorderless()
+ 	{
+-		Form form = Control.FromHandle(Program.gamePtr.Window.Handle).FindForm();
+-		if (!Game1.graphics.IsFullScreen)
+-		{
+-			return form.FormBorderStyle == FormBorderStyle.None;
+-		}
+-		return false;
++		// FNA: fullscreen is always borderless fullscreen-desktop; this only tells which option chose it.
++		return Game1.graphics.IsFullScreen && windowedBorderlessFullscreen;
+ 	}
+ 
+ 	public bool isCurrentlyFullscreen()

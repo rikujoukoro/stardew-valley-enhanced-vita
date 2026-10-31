@@ -1,0 +1,385 @@
+diff --git a/StardewValley.Menus/TitleMenu.cs b/StardewValley.Menus/TitleMenu.cs
+index b83042b0692dae8f910c618a61be8af539bb49d5..3687f21636f7e3b2161d3eae8af2e6e137ead2d3 100644
+--- a/StardewValley.Menus/TitleMenu.cs
++++ b/StardewValley.Menus/TitleMenu.cs
+@@ -26,6 +26,7 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 	public const int region_loadButton = 81116;
+ 
+ 	public const int region_coopButton = 81119;
++	public const int region_modsButton = 81120;
+ 
+ 	public const int region_exitButton = 81117;
+ 
+@@ -317,7 +318,9 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 		{
+ 			myID = 81112,
+ 			leftNeighborID = 81111,
+-			downNeighborID = 81113
++			downNeighborID = 81113,
++			// Port: the PC window mode button; the Vita has no windows.
++			visible = !VitaPlatform.IsVita
+ 		};
+ 		startupPreferences = new StartupPreferences();
+ 		startupPreferences.loadPreferences(async: false, applyLanguage: false);
+@@ -441,7 +444,17 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 	{
+ 		titleButtonsTexture = menuContent.Load<Texture2D>("Minigames\\TitleButtons");
+ 		setUpIcons();
++		if (muteMusicButton != null)
++		{
++			muteMusicButton.texture = Game1.mouseCursors;
++		}
++		if (windowedButton != null)
++		{
++			windowedButton.texture = Game1.mouseCursors;
++		}
+ 		tempSprites.Clear();
++		behindSignTempSprites.Clear();
++		birds.Clear();
+ 		startupPreferences.OnLanguageChange(code);
+ 	}
+ 
+@@ -464,42 +477,99 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 		}
+ 	}
+ 
++	private void DrawVitaModsButton(SpriteBatch b, Color tint)
++	{
++		ClickableTextureComponent button = buttons[3];
++		if (!button.visible || button.bounds.X >= Game1.uiViewport.Width)
++			return;
++		float scale = button.scale;
++		int row = button.sourceRect.Y;
++		Vector2 origin = new Vector2(37f, 29f);
++		Vector2 center = new Vector2(button.bounds.X + 37f * button.baseScale, button.bounds.Y + 29f * button.baseScale);
++		// 1. Native wooden button frame
++		b.Draw(titleButtonsTexture, center, new Rectangle(0, row, 74, 58), tint, 0f, origin, scale, SpriteEffects.None, 1f);
++		// 2. Clean inner cream rectangle covering the baked "New" word. The localized words reach sign pixels x7..64 and
++		// y10..38 (Turkish/Spanish/Italian, Russian), so cover the whole inside of the frame (x6..66, y9..47).
++		Vector2 innerTopLeft = center + new Vector2(-31f, -20f) * scale;
++		Vector2 innerSize = new Vector2(61f, 39f) * scale;
++		Color creamColor = (row == 245) ? new Color(255, 255, 192) : new Color(255, 215, 137);
++		b.Draw(Game1.staminaRect, new Rectangle((int)innerTopLeft.X, (int)innerTopLeft.Y, (int)innerSize.X, (int)innerSize.Y), creamColor * (tint.A / 255f));
++		// 3. The tractor (the Mods menu's own vehicle) at the bottom of the sign. At rest the sprite gets
++		// two Vita screen pixels per art pixel (8/3 UI pixels at the 0.75 UI zoom), so it stays crisp.
++		Texture2D tractor = VitaTractorRenderer.IconTexture;
++		if (tractor != null)
++		{
++			Rectangle frame = VitaTractorRenderer.GetFrameSource(1, 0);
++			Rectangle source = new Rectangle(frame.X, frame.Y + 9, 32, 23);
++			float tractorScale = scale * Math.Min(1f, 8f / 3f / button.baseScale);
++			b.Draw(tractor, center + new Vector2(0f, 18f * scale), source, tint, 0f, new Vector2(16f, 23f), tractorScale, SpriteEffects.None, 1f);
++		}
++		// 4. Localized label (Mods / Modlar / 模组) above the tractor. SpriteText pushes text that would leave the screen
++		// back onto it, so while the buttons slide away (Load, Co-op) the label would stay in the corner: skip it there.
++		Rectangle textBounds = new Rectangle((int)(center.X - 28f * scale), (int)(center.Y - 19f * scale), (int)(56f * scale), (int)(16f * scale));
++		if (textBounds.Right > Game1.uiViewport.Width)
++			return;
++		string label = VitaModsText.Button;
++		Color ink = (row == 245) ? new Color(239, 112, 105) : new Color(211, 82, 80);
++		ink = new Color(ink.R * tint.R / 255, ink.G * tint.G / 255, ink.B * tint.B / 255, tint.A);
++		VitaUiText.DrawTitleLabel(b, label, textBounds, ink);
++	}
++
+ 	public void setUpIcons()
+ 	{
+ 		buttons.Clear();
+ 		int buttonWidth = 74;
+-		int mainButtonSetWidth = buttonWidth * 4 * pixelZoom;
+-		mainButtonSetWidth += 24 * pixelZoom;
++		int numButtons = 4;
++		float buttonZoom = VitaPlatform.IsVita ? Math.Min(pixelZoom, Math.Max(1f, (width - 24f) / (buttonWidth * numButtons + (numButtons - 1) * 8))) : pixelZoom;
++		int scaledButtonWidth = (int)(buttonWidth * buttonZoom);
++		int scaledButtonHeight = (int)(58 * buttonZoom);
++		int scaledButtonGap = (int)(8 * buttonZoom);
++		int mainButtonSetWidth = scaledButtonWidth * numButtons + scaledButtonGap * (numButtons - 1);
+ 		int curx = width / 2 - mainButtonSetWidth / 2;
+-		buttons.Add(new ClickableTextureComponent("New", new Rectangle(curx, height - 58 * pixelZoom - 8 * pixelZoom, buttonWidth * pixelZoom, 58 * pixelZoom), null, "", titleButtonsTexture, new Rectangle(0, 187, 74, 58), pixelZoom)
++		buttons.Add(new ClickableTextureComponent("New", new Rectangle(curx, height - scaledButtonHeight - scaledButtonGap, scaledButtonWidth, scaledButtonHeight), null, "", titleButtonsTexture, new Rectangle(0, 187, 74, 58), buttonZoom)
+ 		{
+ 			myID = 81115,
+ 			rightNeighborID = 81116,
+ 			upNeighborID = 81111
+ 		});
+-		curx += (buttonWidth + 8) * pixelZoom;
+-		buttons.Add(new ClickableTextureComponent("Load", new Rectangle(curx, height - 58 * pixelZoom - 8 * pixelZoom, 74 * pixelZoom, 58 * pixelZoom), null, "", titleButtonsTexture, new Rectangle(74, 187, 74, 58), pixelZoom)
++		curx += scaledButtonWidth + scaledButtonGap;
++		buttons.Add(new ClickableTextureComponent("Load", new Rectangle(curx, height - scaledButtonHeight - scaledButtonGap, scaledButtonWidth, scaledButtonHeight), null, "", titleButtonsTexture, new Rectangle(74, 187, 74, 58), buttonZoom)
+ 		{
+ 			myID = 81116,
+ 			leftNeighborID = 81115,
+ 			rightNeighborID = -7777,
+ 			upNeighborID = 81111
+ 		});
+-		curx += (buttonWidth + 8) * pixelZoom;
+-		buttons.Add(new ClickableTextureComponent("Co-op", new Rectangle(curx, height - 58 * pixelZoom - 8 * pixelZoom, 74 * pixelZoom, 58 * pixelZoom), null, "", titleButtonsTexture, new Rectangle(148, 187, 74, 58), pixelZoom)
++		curx += scaledButtonWidth + scaledButtonGap;
++		buttons.Add(new ClickableTextureComponent("Co-op", new Rectangle(curx, height - scaledButtonHeight - scaledButtonGap, scaledButtonWidth, scaledButtonHeight), null, "", titleButtonsTexture, new Rectangle(148, 187, 74, 58), buttonZoom)
+ 		{
+ 			myID = 81119,
+ 			leftNeighborID = 81116,
+-			rightNeighborID = 81117
+-		});
+-		curx += (buttonWidth + 8) * pixelZoom;
+-		buttons.Add(new ClickableTextureComponent("Exit", new Rectangle(curx, height - 58 * pixelZoom - 8 * pixelZoom, 74 * pixelZoom, 58 * pixelZoom), null, "", titleButtonsTexture, new Rectangle(222, 187, 74, 58), pixelZoom)
+-		{
+-			myID = 81117,
+-			leftNeighborID = 81119,
+-			rightNeighborID = 81118,
++			rightNeighborID = (VitaPlatform.IsVita ? region_modsButton : 81117),
+ 			upNeighborID = 81111
+ 		});
++		if (VitaPlatform.IsVita)
++		{
++			curx += scaledButtonWidth + scaledButtonGap;
++			buttons.Add(new ClickableTextureComponent("Mods", new Rectangle(curx, height - scaledButtonHeight - scaledButtonGap, scaledButtonWidth, scaledButtonHeight), null, "", titleButtonsTexture, new Rectangle(0, 187, 74, 58), buttonZoom)
++			{
++				myID = region_modsButton,
++				leftNeighborID = region_coopButton,
++				rightNeighborID = 81118,
++				upNeighborID = 81111
++			});
++		}
++		if (!VitaPlatform.IsVita)
++		{
++			curx += scaledButtonWidth + scaledButtonGap;
++			buttons.Add(new ClickableTextureComponent("Exit", new Rectangle(curx, height - scaledButtonHeight - scaledButtonGap, scaledButtonWidth, scaledButtonHeight), null, "", titleButtonsTexture, new Rectangle(222, 187, 74, 58), buttonZoom)
++			{
++				myID = 81117,
++				leftNeighborID = 81119,
++				rightNeighborID = 81118,
++				upNeighborID = 81111
++			});
++		}
+ 		int zoom = (ShouldShrinkLogo() ? 2 : pixelZoom);
+ 		eRect = new Rectangle(width / 2 - 200 * zoom + 251 * zoom, -300 * zoom - (int)(viewportY / 3f) * zoom + 26 * zoom, 42 * zoom, 68 * zoom);
+ 		screwRect = new Rectangle(width / 2 + 150 * zoom, -300 * zoom - (int)(viewportY / 3f) * zoom + 80 * zoom, 5 * zoom, 5 * zoom);
+@@ -521,7 +591,7 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 		{
+ 			myID = 81118,
+ 			downNeighborID = 81113,
+-			leftNeighborID = -7777,
++			leftNeighborID = VitaPlatform.IsVita ? region_modsButton : -7777,
+ 			upNeighborID = 81112
+ 		};
+ 		skipButton = new ClickableComponent(new Rectangle(width / 2 - 87 * pixelZoom, height / 2 - 34 * pixelZoom, 83 * pixelZoom, 67 * pixelZoom), menuContent.LoadString("Strings\\StringsFromCSFiles:TitleMenu.cs.11741"));
+@@ -574,17 +644,32 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 		}
+ 		else if ((oldID == 81118 || oldID == 81113) && direction == 3)
+ 		{
+-			if (getComponentWithID(81117) != null)
++			if (getComponentWithID(region_modsButton) != null)
++			{
++				setCurrentlySnappedComponentTo(region_modsButton);
++				snapCursorToCurrentSnappedComponent();
++			}
++			else if (getComponentWithID(81117) != null)
+ 			{
+ 				setCurrentlySnappedComponentTo(81117);
+ 				snapCursorToCurrentSnappedComponent();
+ 			}
++			else if (getComponentWithID(81119) != null)
++			{
++				setCurrentlySnappedComponentTo(81119);
++				snapCursorToCurrentSnappedComponent();
++			}
+ 			else
+ 			{
+ 				setCurrentlySnappedComponentTo(81116);
+ 				snapCursorToCurrentSnappedComponent();
+ 			}
+ 		}
++		else if (oldID == region_coopButton && direction == 1 && getComponentWithID(region_modsButton) != null)
++		{
++			setCurrentlySnappedComponentTo(region_modsButton);
++			snapCursorToCurrentSnappedComponent();
++		}
+ 	}
+ 
+ 	public void populateLeafRects()
+@@ -785,7 +870,7 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 			return;
+ 		}
+ 		Game1.playSound("bigDeSelect");
+-		buttonsDX = -1;
++		buttonsDX = (VitaPlatform.IsVita ? -4 : -1);
+ 		if (subMenu is AboutMenu)
+ 		{
+ 			ReturnToMainTitleScreen();
+@@ -831,15 +916,8 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 	{
+ 		lock (this)
+ 		{
+-			hasRoomAnotherFarm = null;
++			hasRoomAnotherFarm = true;
+ 		}
+-		Game1.GetHasRoomAnotherFarmAsync((bool yes) =>
+-		{
+-			lock (this)
+-			{
+-				hasRoomAnotherFarm = yes;
+-			}
+-		});
+ 	}
+ 
+ 	protected void CloseSubMenu()
+@@ -848,7 +926,7 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 		{
+ 			return;
+ 		}
+-		buttonsDX = -1;
++		buttonsDX = (VitaPlatform.IsVita ? -4 : -1);
+ 		if (subMenu is AboutMenu || subMenu is LanguageSelectionMenu)
+ 		{
+ 			subMenu = null;
+@@ -1192,7 +1270,7 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 		switch (which)
+ 		{
+ 		case "New":
+-			buttonsDX = 1;
++			buttonsDX = (VitaPlatform.IsVita ? 4 : 1);
+ 			isTransitioningButtons = true;
+ 			Game1.playSound("select");
+ 			foreach (TemporaryAnimatedSprite tempSprite in tempSprites)
+@@ -1202,18 +1280,28 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 			UpdateHasRoomAnotherFarm();
+ 			break;
+ 		case "Co-op":
+-			buttonsDX = 1;
++			buttonsDX = (VitaPlatform.IsVita ? 4 : 1);
+ 			isTransitioningButtons = true;
+ 			Game1.playSound("select");
+ 			UpdateHasRoomAnotherFarm();
+ 			break;
+ 		case "Load":
+ 		case "Invite":
+-			buttonsDX = 1;
++			buttonsDX = (VitaPlatform.IsVita ? 4 : 1);
+ 			isTransitioningButtons = true;
+ 			Game1.playSound("select");
+ 			break;
++		case "Mods":
++			if (!VitaPlatform.IsVita)
++				break;
++			Game1.playSound("newArtifact");
++			subMenu = new VitaModsMenu();
++			break;
+ 		case "Exit":
++			if (VitaPlatform.IsVita)
++			{
++				break;
++			}
+ 			Game1.playSound("bigDeSelect");
+ 			Game1.changeMusicTrack("none");
+ 			quitTimer = 500;
+@@ -1330,7 +1418,10 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 			quitTimer -= time.ElapsedGameTime.Milliseconds;
+ 			if (quitTimer <= 0)
+ 			{
+-				Game1.quit = true;
++				if (!VitaPlatform.IsVita)
++				{
++					Game1.quit = true;
++				}
+ 				Game1.exitActiveMenu();
+ 			}
+ 		}
+@@ -1422,7 +1513,8 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 			showButtonsTimer -= time.ElapsedGameTime.Milliseconds;
+ 			if (showButtonsTimer <= 0)
+ 			{
+-				if (buttonsToShow < 4)
++				int maxButtons = 4;
++				if (buttonsToShow < maxButtons)
+ 				{
+ 					buttonsToShow++;
+ 					Game1.playSound("Cowboy_gunshot");
+@@ -1817,7 +1909,12 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 	{
+ 		bool shouldDrawMenu = subMenu == null || subMenu is AboutMenu || subMenu is LanguageSelectionMenu;
+ 		b.Draw(Game1.staminaRect, new Rectangle(0, 0, width, height), new Color(64, 136, 248));
+-		b.Draw(Game1.mouseCursors, new Rectangle(0, (int)((float)(-300 * pixelZoom) - viewportY * 0.66f), width, 300 * pixelZoom + height - 120 * pixelZoom), new Rectangle(703, 1912, 1, 264), Color.White);
++		// Port: the skies are one texel column stretched over the screen; at its edge columns the Vita's GPU samples the
++		// neighbouring column of the sheet (the night sky's left one is transparent, so a bright line of the day sky showed
++		// at the screen's left edge). On the Vita they reach VitaSkyBleed pixels past both sides, off the screen.
++		int skyX = (VitaPlatform.IsVita ? (-VitaSkyBleed) : 0);
++		int skyWidth = width - 2 * skyX;
++		b.Draw(Game1.mouseCursors, new Rectangle(skyX, (int)((float)(-300 * pixelZoom) - viewportY * 0.66f), skyWidth, 300 * pixelZoom + height - 120 * pixelZoom), new Rectangle(703, 1912, 1, 264), Color.White);
+ 		if (!whichSubMenu.Equals("Load"))
+ 		{
+ 			for (int x = -10; x < width; x += 638)
+@@ -1865,13 +1962,14 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 			}
+ 		}
+ 		Texture2D texture2 = Game1.mouseCursors;
+-		Rectangle dstRect = new Rectangle(0, 0, width, height);
++		Rectangle dstRect = new Rectangle(skyX, 0, skyWidth, height);
+ 		Rectangle srcRect = new Rectangle(702, 1912, 1, 264);
+ 		b.Draw(texture2, dstRect, srcRect, Color.White * ((float)globalXOffset / 1200f));
+ 		SpriteEffects effect = SpriteEffects.None;
+ 		for (int y = 0; y < height; y += 195)
+ 		{
+-			for (int j = 0; j < width; j += 638)
++			// Port: Vita starts the tiling 10 art px left of the screen, like the title screen's own clouds above (x = -10), so the sprite's bare left edge never shows as a blue strip on the load screen.
++			for (int j = (VitaPlatform.IsVita ? (-10) : 0); j < width; j += 638)
+ 			{
+ 				b.Draw(Game1.mouseCursors, new Vector2(j, y) * 4f, new Rectangle(0, 1453, 638, 195), Color.White * ((float)globalXOffset / 1200f), 0f, Vector2.Zero, 4f, effect, 0.8f);
+ 			}
+@@ -1921,11 +2019,15 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 			bool greyButtons = subMenu is AboutMenu || subMenu is LanguageSelectionMenu;
+ 			for (int k = 0; k < buttonsToShow; k++)
+ 			{
+-				if (buttons.Count > k)
++				if (buttons.Count > k && !(VitaPlatform.IsVita && k == 3))
+ 				{
+ 					buttons[k].draw(b, (subMenu == null || !greyButtons) ? Color.White : (Color.LightGray * 0.8f), 1f);
+ 				}
+ 			}
++			if (VitaPlatform.IsVita && buttonsToShow > 3 && buttons.Count > 3)
++			{
++				DrawVitaModsButton(b, (subMenu == null || !greyButtons) ? Color.White : (Color.LightGray * 0.8f));
++			}
+ 			if (subMenu == null)
+ 			{
+ 				foreach (TemporaryAnimatedSprite tempSprite in tempSprites)
+@@ -1936,12 +2038,17 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 		}
+ 		if (subMenu != null && !isTransitioningButtons)
+ 		{
+-			if (backButton != null && subMenu.readyToClose())
++			// Port: the save list fills the Vita's screen and the Back button sat on the fourth save (Circle goes back anyway):
++			// no Back button over it; behind it the title's own night sky. (Drawn smaller it striped the letters: under 1:1 the
++			// art's 4 UI pixels land on 2.76 screen pixels, so the rows and columns come out uneven. 3 screen pixels per art
++			// pixel at 1:1, 2 at a third smaller; nothing clean between.)
++			bool vitaHideBackButton = VitaPlatform.IsVita && (subMenu is LoadGameMenu || subMenu is VitaModsMenu || subMenu is VitaPassableMenu);
++			if (backButton != null && subMenu.readyToClose() && !vitaHideBackButton)
+ 			{
+ 				backButton.draw(b);
+ 			}
+ 			subMenu.draw(b);
+-			if (backButton != null && !(subMenu is CharacterCustomization) && subMenu.readyToClose())
++			if (backButton != null && !(subMenu is CharacterCustomization) && subMenu.readyToClose() && !vitaHideBackButton)
+ 			{
+ 				backButton.draw(b);
+ 			}
+@@ -2072,6 +2179,9 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 		}
+ 	}
+ 
++	/// <summary>Port: pixels the title's skies reach past each side of the screen on the Vita (see draw).</summary>
++	private const int VitaSkyBleed = 8;
++
+ 	protected bool ShouldAllowInteraction()
+ 	{
+ 		if (quitTimer > 0)
+@@ -2171,7 +2281,9 @@ public class TitleMenu : IClickableMenu, IDisposable
+ 		{
+ 			myID = 81112,
+ 			leftNeighborID = 81111,
+-			downNeighborID = 81113
++			downNeighborID = 81113,
++			// Port: the PC window mode button; the Vita has no windows.
++			visible = !VitaPlatform.IsVita
+ 		};
+ 		if (Game1.options.SnappyMenus)
+ 		{

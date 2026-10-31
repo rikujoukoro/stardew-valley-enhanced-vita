@@ -1,0 +1,13 @@
+diff --git a/StardewValley.Objects/Furniture.cs b/StardewValley.Objects/Furniture.cs
+index 77908100fd81a465a10e5f4ba7d78aace6fc726d..39a9650c9c89e02da938d22e7bde1a030ae8c8cc 100644
+--- a/StardewValley.Objects/Furniture.cs
++++ b/StardewValley.Objects/Furniture.cs
+@@ -1765,7 +1765,7 @@ public class Furniture : Object, ISittable
+ 		}
+ 		if (shakeTimer > 0)
+ 		{
+-			shakeTimer -= time.ElapsedGameTime.Milliseconds;
++			shakeTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 		}
+ 		if (IsOn && SpecialVariable == 388859)
+ 		{

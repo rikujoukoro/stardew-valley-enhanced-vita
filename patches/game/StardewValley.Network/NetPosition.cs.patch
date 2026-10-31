@@ -1,0 +1,18 @@
+diff --git a/StardewValley.Network/NetPosition.cs b/StardewValley.Network/NetPosition.cs
+index ce1f28473e2881e32065fc9fc90c74a96b3abc27..01532712410e19976bb6384bd864fe619d68412f 100644
+--- a/StardewValley.Network/NetPosition.cs
++++ b/StardewValley.Network/NetPosition.cs
+@@ -118,10 +118,11 @@ public sealed class NetPosition : NetPausableField<Vector2, NetVector2, NetVecto
+ 
+ 	public void UpdateExtrapolation(float extrapolationSpeed)
+ 	{
+-		NetFields.DeltaAggregateTicks = (ushort)((NetFields.Root != null) ? ((ushort)((float)NetFields.Root.Clock.InterpolationTicks * 0.8f)) : 0);
++		// Port: DeltaAggregateTicks' setter is a no-op in this single-player netcode, so the Root/Clock reads that fed it every tick
++		// for every character are skipped; moving is only written when it is set.
+ 		ExtrapolationEnabled = true;
+ 		Field.ExtrapolationSpeed = extrapolationSpeed;
+-		if (IsMaster())
++		if (moving.Value && IsMaster())
+ 		{
+ 			moving.Value = false;
+ 		}

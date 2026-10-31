@@ -1,0 +1,15 @@
+diff --git a/StardewValley/Farm.cs b/StardewValley/Farm.cs
+index 37a0ac7979e562bb8fcc80fa5ab2496bec0871cd..45428ce42e9a15daf48e3b7deca8a9e0b3f7dff6 100644
+--- a/StardewValley/Farm.cs
++++ b/StardewValley/Farm.cs
+@@ -1132,6 +1132,10 @@ public class Farm : GameLocation
+ 		{
+ 			greenhouseUnlocked.Value = true;
+ 		}
++		if (Game1.IsClient)
++		{
++			greenhouseUnlocked.MarkClean();
++		}
+ 		for (int i = characters.Count - 1; i >= 0; i--)
+ 		{
+ 			if (Game1.timeOfDay >= 1300 && characters[i].isMarried() && characters[i].controller == null)

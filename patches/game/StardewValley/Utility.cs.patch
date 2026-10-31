@@ -1,0 +1,181 @@
+diff --git a/StardewValley/Utility.cs b/StardewValley/Utility.cs
+index 9b00e1cf7201e8ac5a7fb908cc99fea41cc879d3..c32913a336a77c184cf7dca8a77ec95108165b2e 100644
+--- a/StardewValley/Utility.cs
++++ b/StardewValley/Utility.cs
+@@ -95,9 +95,99 @@ public class Utility
+ 
+ 	public static Microsoft.Xna.Framework.Rectangle controllerMapSourceRect(Microsoft.Xna.Framework.Rectangle xboxSourceRect)
+ 	{
++		// Port: ControllerMaps.xnb holds four layouts stacked 288 px apart (Xbox, PlayStation, Switch, PlayStation-JP).
++		// The Vita shows the PlayStation set (Cross = confirm, Circle = cancel, Square = use tool, Triangle = crafting).
++		// Same texture that is already loaded, so this costs no extra memory.
++		if (VitaPlatform.IsVita)
++		{
++			xboxSourceRect.Y += 288;
++		}
+ 		return xboxSourceRect;
+ 	}
+ 
++	/// <summary>Port: START drawn over the PlayStation layout's OPTIONS button in the "Menu" box of the button tutorial
++	/// (ButtonTutorialMenu): the Vita's menu button is START.</summary>
++	/// <remarks>Written into the loaded texture once per load, 48 x 28 pixels. The box sits lower where its title takes more
++	/// room (measured from each language's ControllerMaps); other languages use the English position.</remarks>
++	public static void VitaPatchControllerMaps(Texture2D texture)
++	{
++		if (!VitaPlatform.IsVita || texture == null)
++		{
++			return;
++		}
++		int centerX = 633;
++		int centerY = 404; // PlayStation layout (Utility.controllerMapSourceRect: 288 down)
++		switch (LocalizedContentManager.CurrentLanguageCode)
++		{
++		case LocalizedContentManager.LanguageCode.ru:
++			centerY = 406;
++			break;
++		case LocalizedContentManager.LanguageCode.tr:
++			centerX = 632;
++			centerY = 412;
++			break;
++		}
++		// A START button in the icons' colors, one character per 2 x 2 texture pixels (the sheet's pixel size).
++		string[] art = new string[9]
++		{
++			"..ooooooooooooooooooo..",
++			".offfffffffffffffffffo.",
++			"oftttftttfftffttfftttfo",
++			"oftfffftfftftftftfftffo",
++			"oftttfftfftttfttffftffo",
++			"offftfftfftftftftfftffo",
++			"oftttfftfftftftftfftffo",
++			".offfffffffffffffffffo.",
++			"..ooooooooooooooooooo.."
++		};
++		const int width = 48;
++		const int height = 28;
++		Color[] pixels = new Color[width * height];
++		Color background = new Color(0, 12, 22);
++		for (int i = 0; i < pixels.Length; i++)
++		{
++			pixels[i] = background;
++		}
++		int left = (width - art[0].Length * 2) / 2;
++		int top = (height - art.Length * 2) / 2;
++		for (int row = 0; row < art.Length; row++)
++		{
++			for (int column = 0; column < art[row].Length; column++)
++			{
++				Color color;
++				switch (art[row][column])
++				{
++				case 'o':
++					color = new Color(22, 22, 22);
++					break;
++				case 'f':
++					color = new Color(81, 81, 81);
++					break;
++				case 't':
++					color = new Color(181, 181, 181);
++					break;
++				default:
++					continue;
++				}
++				for (int dy = 0; dy < 2; dy++)
++				{
++					for (int dx = 0; dx < 2; dx++)
++					{
++						pixels[(top + row * 2 + dy) * width + left + column * 2 + dx] = color;
++					}
++				}
++			}
++		}
++		try
++		{
++			texture.SetData(0, new Microsoft.Xna.Framework.Rectangle(centerX - width / 2, centerY - height / 2, width, height), pixels, 0, pixels.Length);
++		}
++		catch (Exception e)
++		{
++			VitaPlatform.Trace("controller map patch failed: " + e.Message);
++		}
++	}
++
+ 	public static List<Vector2> removeDuplicates(List<Vector2> list)
+ 	{
+ 		for (int i = 0; i < list.Count; i++)
+@@ -313,6 +403,23 @@ public class Utility
+ 		return true;
+ 	}
+ 
++	// Port: TimeSpan.Milliseconds is a 64-bit divide and modulo (slow on the Vita's ARM). The frame time is the same
++	// TimeSpan almost every call, so the last answer is reused. Game thread only.
++	private static long _elapsedMsTicks = -1L;
++
++	private static int _elapsedMsValue;
++
++	public static int ElapsedMs(TimeSpan span)
++	{
++		long ticks = span.Ticks;
++		if (ticks != _elapsedMsTicks)
++		{
++			_elapsedMsValue = span.Milliseconds;
++			_elapsedMsTicks = ticks;
++		}
++		return _elapsedMsValue;
++	}
++
+ 	public static void ForEachLocation(Func<GameLocation, bool> action, bool includeInteriors = true, bool includeGenerated = false)
+ 	{
+ 		GameLocation currentLocation = Game1.currentLocation;
+@@ -328,19 +435,23 @@ public class Utility
+ 			{
+ 				continue;
+ 			}
+-			bool shouldContinue = true;
+-			location.ForEachInstancedInterior((GameLocation interior) =>
++			// Port: only locations with buildings can have instanced interiors; skips a closure and a delegate
++			// for each of the ~100 locations on every tick (the location update walks them all).
++			if (location.buildings.Count == 0)
+ 			{
+-				if (action(interior))
++				continue;
++			}
++			// Port: ForEachInstancedInterior inlined (no per-tick closure on the farm).
++			foreach (Building building in location.buildings)
++			{
++				if (building.GetIndoorsType() == IndoorsType.Instanced)
+ 				{
+-					return true;
++					GameLocation interior = building.GetIndoors();
++					if (interior != null && !action(interior))
++					{
++						return;
++					}
+ 				}
+-				shouldContinue = false;
+-				return false;
+-			});
+-			if (!shouldContinue)
+-			{
+-				return;
+ 			}
+ 		}
+ 		if (!includeGenerated)
+@@ -7098,13 +7209,12 @@ public class Utility
+ 
+ 	public static bool isOnScreen(Point positionTile, int acceptableDistanceFromScreenNonTile, GameLocation location = null)
+ 	{
+-		if (location != null && !location.Equals(Game1.currentLocation))
+-		{
+-			return false;
+-		}
+-		if (positionTile.X * 64 > Game1.viewport.X - acceptableDistanceFromScreenNonTile && positionTile.X * 64 < Game1.viewport.X + Game1.viewport.Width + acceptableDistanceFromScreenNonTile && positionTile.Y * 64 > Game1.viewport.Y - acceptableDistanceFromScreenNonTile)
++		// Port: the screen test first. It is a few integer compares, and the location comparison it used to follow
++		// (two net-field reads and a name comparison) was paid every tick by every walking NPC, mostly in locations
++		// the player isn't in; the answer is the same either way.
++		if (positionTile.X * 64 > Game1.viewport.X - acceptableDistanceFromScreenNonTile && positionTile.X * 64 < Game1.viewport.X + Game1.viewport.Width + acceptableDistanceFromScreenNonTile && positionTile.Y * 64 > Game1.viewport.Y - acceptableDistanceFromScreenNonTile && positionTile.Y * 64 < Game1.viewport.Y + Game1.viewport.Height + acceptableDistanceFromScreenNonTile)
+ 		{
+-			return positionTile.Y * 64 < Game1.viewport.Y + Game1.viewport.Height + acceptableDistanceFromScreenNonTile;
++			return location == null || location.Equals(Game1.currentLocation);
+ 		}
+ 		return false;
+ 	}

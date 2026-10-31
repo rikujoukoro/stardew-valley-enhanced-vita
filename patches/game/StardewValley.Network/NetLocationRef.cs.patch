@@ -1,0 +1,30 @@
+diff --git a/StardewValley.Network/NetLocationRef.cs b/StardewValley.Network/NetLocationRef.cs
+index 072407da449ca0860f537796b2c2b33fc7aafbd0..8b22b364e5160da8dee8fa158ea064c49509d5c4 100644
+--- a/StardewValley.Network/NetLocationRef.cs
++++ b/StardewValley.Network/NetLocationRef.cs
+@@ -104,6 +104,16 @@ public class NetLocationRef : INetObject<NetFields>
+ 
+ 	public void Set(GameLocation location)
+ 	{
++		// Port: every character's location is set again each tick (GameLocation._updateCharacters,
++		// Character.update); when it is the one already held, nothing below would change.
++		if (location != null && !_dirty && _gameLocation == location && (object)locationName.Value == location.NameOrUniqueName && isStructure.Value == location.isStructure.Value)
++		{
++			if (location == Game1.currentLocation)
++			{
++				_usedLocalLocation = true;
++			}
++			return;
++		}
+ 		if (location == null)
+ 		{
+ 			isStructure.Value = false;
+@@ -123,7 +133,7 @@ public class NetLocationRef : INetObject<NetFields>
+ 		{
+ 			_gameLocation = location;
+ 		}
+-		if (object.Equals(true, _gameLocation?.IsTemporary))
++		if (_gameLocation != null && _gameLocation.IsTemporary)
+ 		{
+ 			_gameLocation = null;
+ 		}

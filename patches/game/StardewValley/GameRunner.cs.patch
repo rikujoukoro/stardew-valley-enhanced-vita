@@ -1,0 +1,206 @@
+diff --git a/StardewValley/GameRunner.cs b/StardewValley/GameRunner.cs
+index e4615763edd14e9321a4daf5b9e1e961a6141a67..0e0bae9937e4b301a5b7587c76a706c6de79c255 100644
+--- a/StardewValley/GameRunner.cs
++++ b/StardewValley/GameRunner.cs
+@@ -37,21 +37,35 @@ public class GameRunner : Game
+ 
+ 	public GameRunner()
+ 	{
++		VitaPlatform.Trace("GameRunner: base constructor done");
+ 		Program.sdk.EarlyInitialize();
+ 		if (!Program.releaseBuild)
+ 		{
+ 			InactiveSleepTime = new TimeSpan(0L);
+ 		}
++		VitaPlatform.Trace("GameRunner: SDK initialized");
+ 		Game1.graphics = new GraphicsDeviceManager(this);
++		VitaPlatform.Trace("GameRunner: Game1 static constructor and GraphicsDeviceManager done");
+ 		Game1.graphics.PreparingDeviceSettings += (object sender, PreparingDeviceSettingsEventArgs args) =>
+ 		{
+ 			args.GraphicsDeviceInformation.PresentationParameters.RenderTargetUsage = RenderTargetUsage.PreserveContents;
+ 		};
+-		Game1.graphics.PreferredBackBufferWidth = 1280;
+-		Game1.graphics.PreferredBackBufferHeight = 720;
++		if (VitaPlatform.IsVita)
++		{
++			// Port: the Vita's screen is the back buffer; a larger one would be scaled down every frame.
++			Game1.graphics.PreferredBackBufferWidth = VitaPlatform.ScreenWidth;
++			Game1.graphics.PreferredBackBufferHeight = VitaPlatform.ScreenHeight;
++			Game1.graphics.IsFullScreen = true;
++		}
++		else
++		{
++			Game1.graphics.PreferredBackBufferWidth = 1280;
++			Game1.graphics.PreferredBackBufferHeight = 720;
++		}
+ 		Content.RootDirectory = "Content";
+ 		LocalMultiplayer.Initialize();
+ 		ItemRegistry.RegisterItemTypes();
++		VitaPlatform.Trace("GameRunner: item types registered");
+ 		bool first_attempt = true;
+ 		MaxTextureSize = 65536;
+ 		try
+@@ -98,7 +112,7 @@ public class GameRunner : Game
+ 			{
+ 			}
+ 		}
+-		Window.AllowUserResizing = true;
++		Window.AllowUserResizing = !VitaPlatform.IsVita;
+ 		SubscribeClientSizeChange();
+ 		Exiting += (object sender, EventArgs args) =>
+ 		{
+@@ -106,7 +120,12 @@ public class GameRunner : Game
+ 			{
+ 				instance.exitEvent(sender, args);
+ 			});
+-			Process.GetCurrentProcess().Kill();
++			// Port: on the Vita, Run() must return to the launcher, which releases the JIT's executable
++			// memory before the process ends (exiting with it still committed freezes the console).
++			if (!VitaPlatform.IsVita)
++			{
++				Process.GetCurrentProcess().Kill();
++			}
+ 		};
+ 		Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+ 		LocalizedContentManager.OnLanguageChange += (LocalizedContentManager.LanguageCode code) =>
+@@ -117,6 +136,7 @@ public class GameRunner : Game
+ 			});
+ 		};
+ 		DebugTools.GameConstructed(this);
++		VitaPlatform.Trace("GameRunner: constructed");
+ 	}
+ 
+ 	protected override void OnActivated(object sender, EventArgs args)
+@@ -138,7 +158,94 @@ public class GameRunner : Game
+ 		_windowSizeChanged = true;
+ 	}
+ 
++	/// <summary>Port: the vsync interval last given to the display (1: 60 fps, 2: 30 fps); 0 before the first frame.</summary>
++	private int _vitaVsyncInterval;
++
++	/// <summary>Port: the Vita's frame rate cap (<see cref="P:StardewValley.VitaPlatform.FpsLimit" />). Updates keep their 60 a second.</summary>
++	/// <remarks>
++	/// At 30 the display waits two refreshes per flip, so every frame is up for exactly 33.3 ms, and the fixed timestep runs
++	/// two updates per frame. Draws used to be skipped by the clock instead: the skips drifted against the vsync, some
++	/// frames stayed up 50 ms and others 16, and the cap measured 28 fps that looked worse than 60 with drops.
++	/// </remarks>
++	protected override bool BeginDraw()
++	{
++		int limit = VitaPlatform.FpsLimit;
++		if (limit == 0)
++		{
++			limit = VitaAutoFrameLimit();
++		}
++		// Port: keep one update per frame at 60 (FNA's Game.Tick); under a lower cap two updates a frame are the plan.
++		VitaElasticTimestep = VitaPlatform.IsVita && limit >= 60;
++		int interval = (limit < 60) ? 2 : 1;
++		// Every 2 s it is given again as well: a 30 cap once stayed at 60 in the mines until the title screen, and
++		// whatever reset it, this puts it back.
++		if (interval != _vitaVsyncInterval || ++_vitaVsyncRecheck >= 120)
++		{
++			_vitaVsyncRecheck = 0;
++			_vitaVsyncInterval = interval;
++			VitaPlatform.SetVsyncInterval(interval);
++		}
++		return base.BeginDraw();
++	}
++
++	private int _vitaVsyncRecheck;
++
++	/// <summary>Port: Stopwatch ticks spent in Update and Draw since the automatic cap last looked, and how many of each.</summary>
++	private long _vitaAutoUpdateTicks;
++
++	private long _vitaAutoDrawTicks;
++
++	private int _vitaAutoUpdates;
++
++	private int _vitaAutoDraws;
++
++	private long _vitaAutoWindowEnd;
++
++	private long _vitaAutoHoldUntil;
++
++	private int _vitaAutoCap = 60;
++
++	/// <summary>Port: the automatic frame rate cap, as the official Vita release had it: 60 while one update and one draw fit in a 60 Hz frame, 30 as soon as they don't, back to 60 once they fit again with room to spare. A frame that would just miss 16.6 ms is shown on the vsync after next (a 33 ms hitch among 16 ms frames); a steady 30 looks smoother than 60 with such hitches.</summary>
++	/// <remarks>Looks every quarter second, so a busy spot switches within a few frames; after dropping to 30 it stays there at least a second, so it doesn't flicker between the two.</remarks>
++	private int VitaAutoFrameLimit()
++	{
++		long now = Stopwatch.GetTimestamp();
++		if (now >= _vitaAutoWindowEnd)
++		{
++			if (_vitaAutoUpdates > 0 && _vitaAutoDraws > 0)
++			{
++				double tickMs = 1000.0 / Stopwatch.Frequency;
++				double frameMs = _vitaAutoUpdateTicks * tickMs / _vitaAutoUpdates + _vitaAutoDrawTicks * tickMs / _vitaAutoDraws;
++				if (_vitaAutoCap == 60 && frameMs > 15.5)
++				{
++					_vitaAutoCap = 30;
++					_vitaAutoHoldUntil = now + Stopwatch.Frequency;
++				}
++				else if (_vitaAutoCap == 30 && now >= _vitaAutoHoldUntil && frameMs < 13.0)
++				{
++					_vitaAutoCap = 60;
++				}
++			}
++			_vitaAutoUpdateTicks = 0;
++			_vitaAutoDrawTicks = 0;
++			_vitaAutoUpdates = 0;
++			_vitaAutoDraws = 0;
++			_vitaAutoWindowEnd = now + Stopwatch.Frequency / 4;
++		}
++		return _vitaAutoCap;
++	}
++
+ 	protected override void Draw(GameTime gameTime)
++	{
++		long start = Stopwatch.GetTimestamp();
++		VitaPlatform.BeginFramePhase();
++		DrawInstances(gameTime);
++		VitaPlatform.EndFramePhase(draw: true);
++		_vitaAutoDrawTicks += Stopwatch.GetTimestamp() - start;
++		_vitaAutoDraws++;
++	}
++
++	private void DrawInstances(GameTime gameTime)
+ 	{
+ 		if (_windowSizeChanged)
+ 		{
+@@ -193,7 +300,7 @@ public class GameRunner : Game
+ 
+ 	public int GetMaxSimultaneousPlayers()
+ 	{
+-		return 4;
++		return LocalMultiplayer.IsSupported ? 4 : 1;
+ 	}
+ 
+ 	public void InitializeMainInstance()
+@@ -253,7 +360,8 @@ public class GameRunner : Game
+ 		{
+ 			gamePtr = new_instance;
+ 		}
+-		if (gameInstances.Count > 0)
++		// Port: without split-screen the statics already hold their defaults and are never swapped.
++		if (gameInstances.Count > 0 && LocalMultiplayer.IsSupported)
+ 		{
+ 			new_instance.staticVarHolder = Activator.CreateInstance(LocalMultiplayer.StaticVarHolderType);
+ 			SetInstanceDefaults(new_instance);
+@@ -309,6 +417,18 @@ public class GameRunner : Game
+ 
+ 	protected override void Update(GameTime gameTime)
+ 	{
++		long start = Stopwatch.GetTimestamp();
++		VitaPlatform.BeginFramePhase();
++		UpdateInstances(gameTime);
++		VitaPlatform.EndFramePhase(draw: false);
++		_vitaAutoUpdateTicks += Stopwatch.GetTimestamp() - start;
++		_vitaAutoUpdates++;
++	}
++
++	private void UpdateInstances(GameTime gameTime)
++	{
++		MemoryReport.Update();
++		MapMemoryManager.Update();
+ 		GameStateQuery.Update();
+ 		for (int i = 0; i < activeNewDayProcesses.Count; i++)
+ 		{

@@ -1,0 +1,20 @@
+diff --git a/xTile.Tiles/TileIndexPropertyAccessor.cs b/xTile.Tiles/TileIndexPropertyAccessor.cs
+index 7b2134a8dff37ef3839e67f297da7394b908a620..f5d7a9ae4f9fd62b5b5a9b3e44bbd48ce10a7d41 100644
+--- a/xTile.Tiles/TileIndexPropertyAccessor.cs
++++ b/xTile.Tiles/TileIndexPropertyAccessor.cs
+@@ -22,6 +22,15 @@ public class TileIndexPropertyAccessor
+ 		}
+ 	}
+ 
++	/// <summary>Port: <c>this[i].CopyFrom(source[i])</c> for every tile index i in [<paramref name="first" />, <paramref name="end" />), as two passes over the sheets' properties. Each CopyFrom alone visits every property of both sheets, so a map override's loop over a whole tile sheet took seconds on the Vita.</summary>
++	public void CopyRangeFrom(TileIndexPropertyAccessor source, int first, int end)
++	{
++		if (first < end)
++		{
++			TileIndexPropertyCollection.CopyRange(m_tileSheet, source.m_tileSheet, first, end);
++		}
++	}
++
+ 	internal TileIndexPropertyAccessor(TileSheet tileSheet)
+ 	{
+ 		m_tileSheet = tileSheet;

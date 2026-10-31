@@ -1,0 +1,13 @@
+diff --git a/StardewValley.TerrainFeatures/FruitTree.cs b/StardewValley.TerrainFeatures/FruitTree.cs
+index 0cc4f7da65eff05906ae9cfdc5e0486f75e4f994..125b35dc9e19adb44012fe161496e94c9efcc664 100644
+--- a/StardewValley.TerrainFeatures/FruitTree.cs
++++ b/StardewValley.TerrainFeatures/FruitTree.cs
+@@ -230,7 +230,7 @@ public class FruitTree : TerrainFeature
+ 		alpha = Math.Min(1f, alpha + 0.05f);
+ 		if (shakeTimer > 0f)
+ 		{
+-			shakeTimer -= time.ElapsedGameTime.Milliseconds;
++			shakeTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 		}
+ 		if (growthStage.Value >= 4 && !falling.Value && !stump.Value && Game1.player.GetBoundingBox().Intersects(new Rectangle(64 * ((int)tileLocation.X - 1), 64 * ((int)tileLocation.Y - 4), 192, 224)))
+ 		{

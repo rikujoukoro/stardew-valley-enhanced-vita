@@ -1,0 +1,342 @@
+diff --git a/StardewValley/Debris.cs b/StardewValley/Debris.cs
+index ef525dcf1af15adb6f036b6e5f289bf935f349ec..a37a0065a5c746bb83d3ca9bcb0c0e451c9ef8d7 100644
+--- a/StardewValley/Debris.cs
++++ b/StardewValley/Debris.cs
+@@ -116,6 +116,27 @@ public class Debris : INetObject<NetFields>
+ 
+ 	public readonly NetString itemId = new NetString();
+ 
++	[System.Xml.Serialization.XmlIgnore]
++	private ParsedItemData _cachedItemData;
++
++	[System.Xml.Serialization.XmlIgnore]
++	private string _cachedItemId;
++
++	public ParsedItemData GetParsedItemData()
++	{
++		string id = itemId.Value;
++		if (id == null)
++		{
++			return null;
++		}
++		if (_cachedItemData == null || _cachedItemId != id)
++		{
++			_cachedItemId = id;
++			_cachedItemData = ItemRegistry.GetDataOrErrorItem(id);
++		}
++		return _cachedItemData;
++	}
++
+ 	private readonly NetRef<Item> netItem = new NetRef<Item>();
+ 
+ 	public Character toHover;
+@@ -458,6 +479,7 @@ public class Debris : INetObject<NetFields>
+ 
+ 	public virtual bool collect(Farmer farmer, Chunk chunk = null)
+ 	{
++		int amount = (chunk != null && chunk.stack > 1) ? chunk.stack : 1;
+ 		if (debrisType.Value == DebrisType.ARCHAEOLOGY)
+ 		{
+ 			Game1.farmerFindsArtifact(itemId.Value);
+@@ -472,9 +494,19 @@ public class Debris : INetObject<NetFields>
+ 				return false;
+ 			}
+ 		}
+-		else if ((debrisType.Value != DebrisType.CHUNKS || chunkType.Value != 8) && !farmer.addItemToInventoryBool(ItemRegistry.Create(itemId.Value, 1, itemQuality)))
++		else if (debrisType.Value != DebrisType.CHUNKS || chunkType.Value != 8)
+ 		{
+-			return false;
++			Object existingSlot = farmer.TryFindStackForDebris(itemId.Value, amount, itemQuality, GetParsedItemData());
++			if (existingSlot != null)
++			{
++				existingSlot.Stack += amount;
++				farmer.OnStackMergedFromDebris(existingSlot, amount);
++				return true;
++			}
++			if (!farmer.addItemToInventoryBool(ItemRegistry.Create(itemId.Value, amount, itemQuality)))
++			{
++				return false;
++			}
+ 		}
+ 		return true;
+ 	}
+@@ -546,9 +578,46 @@ public class Debris : INetObject<NetFields>
+ 		maxXVelocity = (int)((float)maxXVelocity * velocityMultiplyer);
+ 		minYVelocity = (int)((float)minYVelocity * velocityMultiplyer);
+ 		maxYVelocity = (int)((float)maxYVelocity * velocityMultiplyer);
+-		for (int i = 0; i < numberOfChunks; i++)
++		if (VitaPlatform.MinimalDebris && numberOfChunks > 1)
++		{
++			if (item == null && (debrisType.Value == DebrisType.RESOURCE || debrisType.Value == DebrisType.OBJECT))
++			{
++				Chunk c = new Chunk(debrisOrigin, (float)Game1.recentMultiplayerRandom.Next(minXVelocity, maxXVelocity) / 40f, (float)Game1.recentMultiplayerRandom.Next(minYVelocity, maxYVelocity) / 40f, Game1.recentMultiplayerRandom.Next(0, 2));
++				c.stack = numberOfChunks;
++				chunks.Add(c);
++				return;
++			}
++			if (item != null)
++			{
++				if (item.Stack < numberOfChunks)
++				{
++					item.Stack = numberOfChunks;
++				}
++				numberOfChunks = 1;
++			}
++			else if ((debrisType.Value == DebrisType.CHUNKS || debrisType.Value == DebrisType.SPRITECHUNKS) && chunkType.Value != 8)
++			{
++				numberOfChunks = 1;
++			}
++		}
++		if (VitaPlatform.IsVita && numberOfChunks > 1 && item == null && (debrisType.Value == DebrisType.RESOURCE || debrisType.Value == DebrisType.OBJECT))
++		{
++			int remaining = numberOfChunks;
++			while (remaining > 0)
++			{
++				int chunkStack = (remaining >= 2) ? 2 : 1;
++				remaining -= chunkStack;
++				Chunk c = new Chunk(debrisOrigin, (float)Game1.recentMultiplayerRandom.Next(minXVelocity, maxXVelocity) / 40f, (float)Game1.recentMultiplayerRandom.Next(minYVelocity, maxYVelocity) / 40f, Game1.recentMultiplayerRandom.Next(0, 2));
++				c.stack = chunkStack;
++				chunks.Add(c);
++			}
++		}
++		else
+ 		{
+-			chunks.Add(new Chunk(debrisOrigin, (float)Game1.recentMultiplayerRandom.Next(minXVelocity, maxXVelocity) / 40f, (float)Game1.recentMultiplayerRandom.Next(minYVelocity, maxYVelocity) / 40f, Game1.recentMultiplayerRandom.Next(0, 2)));
++			for (int i = 0; i < numberOfChunks; i++)
++			{
++				chunks.Add(new Chunk(debrisOrigin, (float)Game1.recentMultiplayerRandom.Next(minXVelocity, maxXVelocity) / 40f, (float)Game1.recentMultiplayerRandom.Next(minYVelocity, maxYVelocity) / 40f, Game1.recentMultiplayerRandom.Next(0, 2)));
++			}
+ 		}
+ 	}
+ 
+@@ -616,7 +685,7 @@ public class Debris : INetObject<NetFields>
+ 		{
+ 			return true;
+ 		}
+-		timeSinceDoneBouncing += time.ElapsedGameTime.Milliseconds;
++		timeSinceDoneBouncing += Utility.ElapsedMs(time.ElapsedGameTime);
+ 		if (timeSinceDoneBouncing >= (floppingFish.Value ? 2500f : ((debrisType.Value == DebrisType.SPRITECHUNKS || debrisType.Value == DebrisType.NUMBERS) ? 1800f : 600f)))
+ 		{
+ 			switch (debrisType.Value)
+@@ -682,21 +751,31 @@ public class Debris : INetObject<NetFields>
+ 			}
+ 		}
+ 		bool anyCouldMove = false;
++		bool? canAcceptForChunks = null;
++		DebrisType dType = debrisType.Value;
++		bool isSpriteOrNumbers = dType == DebrisType.SPRITECHUNKS || dType == DebrisType.NUMBERS;
++		bool isGoldCoin = item != null && item.QualifiedItemId == "(O)GoldCoin";
++		float maxDisplayX = (float)(location.map.DisplayWidth + 64);
++		float maxDisplayY = (float)(location.map.DisplayHeight + 64);
++		ParsedItemData cachedData = GetParsedItemData();
++		Object batchedSlot = null;
++		int batchedCount = 0;
++		Farmer batchedFarmer = null;
+ 		for (int i = chunks.Count - 1; i >= 0; i--)
+ 		{
+ 			Chunk chunk = chunks[i];
+ 			chunk.position.UpdateExtrapolation(chunk.getSpeed());
+-			if (chunk.alpha > 0.1f && (debrisType.Value == DebrisType.SPRITECHUNKS || debrisType.Value == DebrisType.NUMBERS) && timeSinceDoneBouncing > 600f)
++			if (chunk.alpha > 0.1f && isSpriteOrNumbers && timeSinceDoneBouncing > 600f)
+ 			{
+ 				chunk.alpha = (1800f - timeSinceDoneBouncing) / 1000f;
+ 			}
+-			if (chunk.position.X < -128f || chunk.position.Y < -64f || chunk.position.X >= (float)(location.map.DisplayWidth + 64) || chunk.position.Y >= (float)(location.map.DisplayHeight + 64))
++			if (chunk.position.X < -128f || chunk.position.Y < -64f || chunk.position.X >= maxDisplayX || chunk.position.Y >= maxDisplayY)
+ 			{
+ 				chunks.RemoveAt(i);
+ 			}
+ 			else
+ 			{
+-				if (item?.QualifiedItemId == "(O)GoldCoin")
++				if (isGoldCoin)
+ 				{
+ 					animationTimer += (int)time.ElapsedGameTime.TotalMilliseconds;
+ 					if (animationTimer > 700f)
+@@ -708,63 +787,116 @@ public class Debris : INetObject<NetFields>
+ 				bool canMoveTowardPlayer = farmer != null;
+ 				if (canMoveTowardPlayer)
+ 				{
+-					switch (debrisType.Value)
++					if (!canAcceptForChunks.HasValue)
+ 					{
+-					case DebrisType.ARCHAEOLOGY:
+-					case DebrisType.OBJECT:
+-						if (item != null)
++						switch (dType)
+ 						{
+-							canMoveTowardPlayer = farmer.couldInventoryAcceptThisItem(item);
++						case DebrisType.ARCHAEOLOGY:
++						case DebrisType.OBJECT:
++							if (item != null)
++							{
++								canAcceptForChunks = farmer.couldInventoryAcceptThisItem(item);
++								break;
++							}
++							canAcceptForChunks = farmer.couldInventoryAcceptThisItem(itemId.Value, 1, itemQuality, cachedData) && !(itemId.Value == "(O)102" && farmer.hasMenuOpen.Value);
++							break;
++						case DebrisType.RESOURCE:
++							canAcceptForChunks = farmer.couldInventoryAcceptThisItem(itemId.Value, 1, 0, cachedData);
++							break;
++						default:
++							canAcceptForChunks = true;
+ 							break;
+ 						}
+-						canMoveTowardPlayer = farmer.couldInventoryAcceptThisItem(itemId.Value, 1, itemQuality);
+-						if (itemId.Value == "(O)102" && farmer.hasMenuOpen.Value)
+-						{
+-							canMoveTowardPlayer = false;
+-						}
+-						break;
+-					case DebrisType.RESOURCE:
+-						canMoveTowardPlayer = farmer.couldInventoryAcceptThisItem(itemId.Value, 1);
+-						break;
+-					default:
+-						canMoveTowardPlayer = true;
+-						break;
+ 					}
++					canMoveTowardPlayer = canAcceptForChunks.Value;
+ 					anyCouldMove |= canMoveTowardPlayer;
+ 					if (canMoveTowardPlayer && shouldControlThis(location))
+ 					{
+ 						player.Value = farmer;
+ 					}
+ 				}
+-				if (((chunksMoveTowardPlayer || isFishable) & canMoveTowardPlayer) && player.Value != null)
++				Farmer targetPlayer = player.Value;
++				if (((chunksMoveTowardPlayer || isFishable) & canMoveTowardPlayer) && targetPlayer != null)
+ 				{
+-					if (player.Value.IsLocalPlayer)
++					if (targetPlayer.IsLocalPlayer)
+ 					{
+-						if (chunk.position.X < player.Value.Position.X - 12f)
++						float oldVx = chunk.xVelocity.Value;
++						float oldVy = chunk.yVelocity.Value;
++						float vx = oldVx;
++						float vy = oldVy;
++						float posX = chunk.position.X;
++						float posY = chunk.position.Y;
++
++						float targetX = targetPlayer.Position.X;
++						if (posX < targetX - 12f)
++						{
++							vx = Math.Min(vx + 0.8f, 8f);
++						}
++						else if (posX > targetX + 12f)
++						{
++							vx = Math.Max(vx - 0.8f, -8f);
++						}
++						Point playerPixel = targetPlayer.StandingPixel;
++						int playerStandingY = playerPixel.Y;
++						if (posY + 32f < (float)(playerStandingY - 12))
+ 						{
+-							chunk.xVelocity.Value = Math.Min(chunk.xVelocity.Value + 0.8f, 8f);
++							vy = Math.Max(vy - 0.8f, -8f);
+ 						}
+-						else if (chunk.position.X > player.Value.Position.X + 12f)
++						else if (posY + 32f > (float)(playerStandingY + 12))
+ 						{
+-							chunk.xVelocity.Value = Math.Max(chunk.xVelocity.Value - 0.8f, -8f);
++							vy = Math.Min(vy + 0.8f, 8f);
+ 						}
+-						int playerStandingY = player.Value.StandingPixel.Y;
+-						if (chunk.position.Y + 32f < (float)(playerStandingY - 12))
++						posX += vx;
++						posY -= vy;
++						if (vx != oldVx)
+ 						{
+-							chunk.yVelocity.Value = Math.Max(chunk.yVelocity.Value - 0.8f, -8f);
++							chunk.xVelocity.Value = vx;
+ 						}
+-						else if (chunk.position.Y + 32f > (float)(playerStandingY + 12))
++						if (vy != oldVy)
+ 						{
+-							chunk.yVelocity.Value = Math.Min(chunk.yVelocity.Value + 0.8f, 8f);
++							chunk.yVelocity.Value = vy;
+ 						}
+-						chunk.position.X += chunk.xVelocity.Value;
+-						chunk.position.Y -= chunk.yVelocity.Value;
+-						Point playerPixel = player.Value.StandingPixel;
+-						if (Math.Abs(chunk.position.X + 32f - (float)playerPixel.X) <= 64f && Math.Abs(chunk.position.Y + 32f - (float)playerPixel.Y) <= 64f)
++						chunk.position.X = posX;
++						chunk.position.Y = posY;
++
++						if (Math.Abs(posX + 32f - (float)playerPixel.X) <= 64f && Math.Abs(posY + 32f - (float)playerPixel.Y) <= 64f)
+ 						{
++							int amount = (chunk.stack > 1) ? chunk.stack : 1;
++							if (item == null && dType != DebrisType.ARCHAEOLOGY && (dType != DebrisType.CHUNKS || chunkType.Value != 8))
++							{
++								Object slot = batchedSlot;
++								if (slot == null || slot.Stack + amount > slot.maximumStackSize())
++								{
++									if (batchedCount > 0 && batchedSlot != null)
++									{
++										batchedFarmer.OnStackMergedFromDebris(batchedSlot, batchedCount);
++										batchedCount = 0;
++										batchedSlot = null;
++									}
++									slot = targetPlayer.TryFindStackForDebris(itemId.Value, amount, itemQuality, cachedData);
++								}
++								if (slot != null)
++								{
++									slot.Stack += amount;
++									batchedSlot = slot;
++									batchedFarmer = targetPlayer;
++									batchedCount += amount;
++									if (Game1.debrisSoundInterval <= 0f)
++									{
++										Game1.debrisSoundInterval = 10f;
++										if (itemId.Value != "(O)73")
++										{
++											location.localSound("coin");
++										}
++									}
++									chunks.RemoveAt(i);
++									continue;
++								}
++							}
+ 							Item old = item;
+-							if (collect(player.Value, chunk))
++							if (collect(targetPlayer, chunk))
+ 							{
++								canAcceptForChunks = null;
+ 								if (Game1.debrisSoundInterval <= 0f)
+ 								{
+ 									Game1.debrisSoundInterval = 10f;
+@@ -784,11 +916,13 @@ public class Debris : INetObject<NetFields>
+ 					{
+ 						updateHoverPosition(chunk);
+ 					}
+-					chunk.position.X += chunk.xVelocity.Value;
+-					chunk.position.Y -= chunk.yVelocity.Value;
++					float vx = chunk.xVelocity.Value;
++					float vy = chunk.yVelocity.Value;
++					chunk.position.X += vx;
++					chunk.position.Y -= vy;
+ 					if (movingFinalYLevel)
+ 					{
+-						chunkFinalYLevel -= (int)Math.Ceiling(chunk.yVelocity.Value / 2f);
++						chunkFinalYLevel -= (int)Math.Ceiling(vy / 2f);
+ 						if (chunkFinalYLevel <= chunkFinalYTarget)
+ 						{
+ 							chunkFinalYLevel = chunkFinalYTarget;
+@@ -850,7 +984,7 @@ public class Debris : INetObject<NetFields>
+ 							{
+ 								chunk.bob = (float)Math.Sin(Game1.currentGameTime.TotalGameTime.TotalSeconds * 1.25 + (double)(position.X / 32f)) * 4f;
+ 							}
+-							chunk.sinkTimer.Value -= time.ElapsedGameTime.Milliseconds;
++							chunk.sinkTimer.Value -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 							if (chunk.sinkTimer.Value <= 0)
+ 							{
+ 								destroyThisChunk = location.sinkDebris(this, chunkTile, chunk.position.Value);
+@@ -882,6 +1016,10 @@ public class Debris : INetObject<NetFields>
+ 				}
+ 			}
+ 		}
++		if (batchedCount > 0 && batchedSlot != null)
++		{
++			batchedFarmer.OnStackMergedFromDebris(batchedSlot, batchedCount);
++		}
+ 		if (!anyCouldMove && shouldControlThis(location))
+ 		{
+ 			player.Value = null;

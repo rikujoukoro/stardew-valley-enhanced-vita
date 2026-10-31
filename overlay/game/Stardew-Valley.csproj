@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Stardew Valley</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>False</UseWindowsForms>
+    <TargetFramework>net40</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+    <Nullable>disable</Nullable>
+    <NoWarn>$(NoWarn);CS0108;CS0114;CS0162;CS0168;CS0169;CS0219;CS0414;CS0612;CS0618;CS0649;CS0659;CS0660;CS0661;CS1998;CS8981</NoWarn>
+  </PropertyGroup>
+  <!-- vita-builder passes -p:VitaRelease=true for the public build (no test menu); our own builds leave it off. -->
+  <PropertyGroup Condition="'$(VitaRelease)' == 'true'">
+    <DefineConstants>$(DefineConstants);VITA_RELEASE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <RootNamespace />
+    <GameDir>$(MSBuildThisFileDirectory)..\Stardew Valley Pc Compability\</GameDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Tools/**" />
+    <None Remove="Tools/**" />
+    <Compile Remove="Deps/**" />
+    <None Remove="Deps/**" />
+    <None Remove="Microsoft.Xna.Framework.RuntimeProfile" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- FNA replaces XNA 4.0 (Microsoft.Xna.Framework*). xTile, BmFont and StardewValley.GameData were
+         compiled against XNA, so they're decompiled under Deps/ and rebuilt against FNA. -->
+    <ProjectReference Include="..\FNA\FNA.NetFramework.csproj" />
+    <ProjectReference Include="Deps\xTile\xTile.csproj" />
+    <ProjectReference Include="Deps\BmFont\BmFont.csproj" />
+    <ProjectReference Include="Deps\StardewValley.GameData\StardewValley.GameData.csproj" />
+    <ProjectReference Include="Deps\Lidgren.Network\Lidgren.Network.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- FNA's native libraries (SDL3, FNA3D, FAudio, Theorafile), from fnalibs.zip extracted next to this repo. -->
+    <None Include="..\fnalibs\x86\*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <PropertyGroup>
+    <!-- Only the assemblies the game uses; nothing Windows-only (WinForms, WPF, System.Drawing),
+         so the build stays portable to Mono on the Vita. -->
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="mscorlib" />
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Data.HashFunction.Core">
+      <HintPath>$(GameDir)System.Data.HashFunction.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Data.HashFunction.Interfaces">
+      <HintPath>$(GameDir)System.Data.HashFunction.Interfaces.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Data.HashFunction.xxHash">
+      <HintPath>$(GameDir)System.Data.HashFunction.xxHash.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

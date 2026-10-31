@@ -1,0 +1,19 @@
+{
+  "comment": "Inputs the patches were made against: Stardew Valley 1.6.15, 'compatibility' beta branch. Any other hash is refused.",
+  "ilspycmd": {
+    "version": "11.1.0.9782",
+    "nupkg_sha256": "74c07facaf1850c78a779fc509031f756e1c0de24b1a536f3363d7ef81ce001f"
+  },
+  "builds": [
+    {
+      "name": "Steam 1.6.15 compatibility (depot build 16826373)",
+      "files": {
+        "Stardew Valley.exe": "0cb091faf1c3ade402340641fc47bcf9a8f6e591a645f27a4c0db2fcdc966086",
+        "xTile.dll": "889b89f06e9699f449b448ac0e9d332c1bee61488f68e590dcb48b16867b293e",
+        "BmFont.dll": "f2de1f778398d7e7366f182e1cd36b6dd236ae3be815df24923775b76621a001",
+        "StardewValley.GameData.dll": "68a852ca7c0c71d677c8a0865c2d71827386ad22a899266fff2a630981fb86a8",
+        "Lidgren.Network.dll": "f5ff9d3be5d1d91e99474239a3756ae76675491cfe5e7553e2722658aa4fb3b4"
+      }
+    }
+  ]
+}

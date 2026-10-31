@@ -1,0 +1,223 @@
+diff --git a/StardewValley.Menus/OptionsPage.cs b/StardewValley.Menus/OptionsPage.cs
+index f17a571cf800b77e6c897866e12e8f5a1e5cd253..8488d91367f08c5a8be7237b3d2af505a3e1b481 100644
+--- a/StardewValley.Menus/OptionsPage.cs
++++ b/StardewValley.Menus/OptionsPage.cs
+@@ -54,55 +54,82 @@ public class OptionsPage : IClickableMenu
+ 			});
+ 		}
+ 		options.Add(new OptionsElement(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11233")));
++		if (VitaPlatform.IsVita)
++		{
++			// Port: the two helper options sit at the very top of the list, right under the first section title.
++			options.Add(new OptionsCheckbox(VitaPlatform.AutoAttackLabel, VitaPlatform.AutoAttackOption));
++			options.Add(new OptionsCheckbox(VitaPlatform.AutoToolLabel, VitaPlatform.AutoToolOption));
++		}
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11234"), 0));
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11235"), 7));
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11236"), 8));
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11237"), 11));
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11238"), 12));
+-		if (Game1.game1.IsMainInstance)
++		if (!VitaPlatform.IsVita)
+ 		{
+-			options.Add(new OptionsDropDown(Game1.content.LoadString("Strings\\UI:Options_GamepadMode"), 38));
++			if (Game1.game1.IsMainInstance)
++			{
++				options.Add(new OptionsDropDown(Game1.content.LoadString("Strings\\UI:Options_GamepadMode"), 38));
++			}
+ 		}
+ 		options.Add(new OptionsDropDown(Game1.content.LoadString("Strings\\UI:Options_StowingMode"), 28));
+ 		options.Add(new OptionsDropDown(Game1.content.LoadString("Strings\\UI:Options_SlingshotMode"), 41));
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11239"), 27));
+-		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11240"), 14));
++		if (!VitaPlatform.IsVita)
++		{
++			options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11240"), 14));
++		}
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\UI:Options_GamepadStyleMenus"), 29));
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\UI:Options_ShowAdvancedCraftingInformation"), 34));
+ 		bool showLocalCoopOptions = Game1.game1.IsMainInstance && Game1.game1.IsLocalCoopJoinable();
+-		if ((Game1.multiplayerMode == 2) | showLocalCoopOptions)
+-		{
+-			options.Add(new OptionsElement(Game1.content.LoadString("Strings\\UI:OptionsPage_MultiplayerSection")));
+-		}
+-		if (Game1.multiplayerMode == 2 && Game1.server != null && !Game1.server.IsLocalMultiplayerInitiatedServer())
+-		{
+-			options.Add(new OptionsDropDown(Game1.content.LoadString("Strings\\UI:GameMenu_ServerMode"), 31));
+-			options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\UI:OptionsPage_IPConnections"), 30));
+-			options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\UI:OptionsPage_FarmhandCreation"), 32));
+-		}
+-		if (Game1.multiplayerMode == 2 && Game1.server != null)
+-		{
+-			options.Add(new OptionsDropDown(Game1.content.LoadString("Strings\\UI:GameMenu_MoveBuildingPermissions"), 40));
+-		}
+-		if (Game1.multiplayerMode == 2 && Game1.server != null && !Game1.server.IsLocalMultiplayerInitiatedServer() && Program.sdk.Networking != null)
++		if (VitaPlatform.IsVita)
+ 		{
+-			options.Add(new OptionsButton(Game1.content.LoadString("Strings\\UI:GameMenu_ServerInvite"), offerInvite));
+-			if (Program.sdk.Networking.SupportsInviteCodes())
++			if (Game1.multiplayerMode == 2)
+ 			{
+-				options.Add(new OptionsButton(Game1.content.LoadString("Strings\\UI:OptionsPage_ShowInviteCode"), showInviteCode));
++				options.Add(new OptionsElement(Game1.content.LoadString("Strings\\UI:OptionsPage_MultiplayerSection")));
++				string hostIp = VitaPlatform.GetHostIpAddress();
++				string ipText = !string.IsNullOrEmpty(hostIp)
++					? $"LAN IP: {hostIp} (Port: 24642)"
++					: (VitaPlatform.IsTr ? "LAN IP: Bulunamadı (Wi-Fi yok)" : "LAN IP: Not found");
++				options.Add(new OptionsElement(ipText));
+ 			}
+ 		}
+-		if (showLocalCoopOptions)
++		else
+ 		{
+-			options.Add(new OptionsButton(Game1.content.LoadString("Strings\\UI:StartLocalMulti"), () =>
++			if ((Game1.multiplayerMode == 2) | showLocalCoopOptions)
+ 			{
+-				exitThisMenu(playSound: false);
+-				Game1.game1.ShowLocalCoopJoinMenu();
+-			}));
+-		}
+-		if (Game1.IsMultiplayer)
+-		{
+-			options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\UI:OptionsPage_ShowReadyStatus"), 35));
++				options.Add(new OptionsElement(Game1.content.LoadString("Strings\\UI:OptionsPage_MultiplayerSection")));
++			}
++			if (Game1.multiplayerMode == 2 && Game1.server != null && !Game1.server.IsLocalMultiplayerInitiatedServer())
++			{
++				options.Add(new OptionsDropDown(Game1.content.LoadString("Strings\\UI:GameMenu_ServerMode"), 31));
++				options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\UI:OptionsPage_IPConnections"), 30));
++				options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\UI:OptionsPage_FarmhandCreation"), 32));
++			}
++			if (Game1.multiplayerMode == 2 && Game1.server != null)
++			{
++				options.Add(new OptionsDropDown(Game1.content.LoadString("Strings\\UI:GameMenu_MoveBuildingPermissions"), 40));
++			}
++			if (Game1.multiplayerMode == 2 && Game1.server != null && !Game1.server.IsLocalMultiplayerInitiatedServer() && Program.sdk.Networking != null)
++			{
++				options.Add(new OptionsButton(Game1.content.LoadString("Strings\\UI:GameMenu_ServerInvite"), offerInvite));
++				if (Program.sdk.Networking.SupportsInviteCodes())
++				{
++					options.Add(new OptionsButton(Game1.content.LoadString("Strings\\UI:OptionsPage_ShowInviteCode"), showInviteCode));
++				}
++			}
++			if (showLocalCoopOptions)
++			{
++				options.Add(new OptionsButton(Game1.content.LoadString("Strings\\UI:StartLocalMulti"), () =>
++				{
++					exitThisMenu(playSound: false);
++					Game1.game1.ShowLocalCoopJoinMenu();
++				}));
++			}
++			if (Game1.IsMultiplayer)
++			{
++				options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\UI:OptionsPage_ShowReadyStatus"), 35));
++			}
+ 		}
+ 		options.Add(new OptionsElement(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11241")));
+ 		if (Game1.game1.IsMainInstance)
+@@ -116,39 +143,54 @@ public class OptionsPage : IClickableMenu
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11246"), 3));
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:Options_ToggleAnimalSounds"), 43));
+ 		options.Add(new OptionsElement(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11247")));
+-		if (!Game1.conventionMode && Game1.game1.IsMainInstance)
++		if (!Game1.conventionMode && Game1.game1.IsMainInstance && !VitaPlatform.IsVita)
+ 		{
+ 			options.Add(new OptionsDropDown(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11248"), 13));
+ 			options.Add(new OptionsDropDown(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11251"), 6));
+ 		}
+ 		options.Add(new OptionsDropDown(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11252"), 9));
+-		if (Game1.game1.IsMainInstance)
++		if (!VitaPlatform.IsVita)
+ 		{
+-			options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\UI:Options_Vsync"), 37));
++			if (Game1.game1.IsMainInstance)
++			{
++				options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\UI:Options_Vsync"), 37));
++			}
+ 		}
+-		List<string> zoom_options = new List<string>();
+-		for (int zoom = 75; zoom <= 150; zoom += 5)
++		if (VitaPlatform.IsVita)
+ 		{
+-			zoom_options.Add(zoom + "%");
++			// The Vita's one zoom choice: the camera zoom (VitaPlatform.CameraZoom).
++			options.Add(new OptionsPlusMinus(VitaPlatform.CloseZoomLabel, VitaPlatform.CloseZoomOption, VitaPlatform.CameraZoomLabels, VitaPlatform.CameraZoomLabels));
+ 		}
+-		options.Add(new OptionsPlusMinus(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage_UIScale"), 39, zoom_options, zoom_options));
+-		zoom_options = new List<string>();
+-		for (int zoom2 = 75; zoom2 <= 200; zoom2 += 5)
++		else
+ 		{
+-			zoom_options.Add(zoom2 + "%");
++			// The Vita fixes the UI scale, zoom level and toolbar pinning (see VitaPlatform).
++			List<string> zoom_options = new List<string>();
++			for (int zoom = 75; zoom <= 150; zoom += 5)
++			{
++				zoom_options.Add(zoom + "%");
++			}
++			options.Add(new OptionsPlusMinus(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage_UIScale"), 39, zoom_options, zoom_options));
++			zoom_options = new List<string>();
++			for (int zoom2 = 75; zoom2 <= 200; zoom2 += 5)
++			{
++				zoom_options.Add(zoom2 + "%");
++			}
++			options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11253"), 15));
++			options.Add(new OptionsPlusMinus(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11254"), 18, zoom_options, zoom_options));
++			options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11266"), 19));
+ 		}
+-		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11253"), 15));
+-		options.Add(new OptionsPlusMinus(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11254"), 18, zoom_options, zoom_options));
+-		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11266"), 19));
+ 		options.Add(new OptionsSlider(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11271"), 23));
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11272"), 24));
+-		if (!LocalMultiplayer.IsLocalMultiplayer())
++		if (!LocalMultiplayer.IsLocalMultiplayer() && !VitaPlatform.IsVita)
+ 		{
+ 			options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11273"), 26));
+ 		}
+ 		if (Game1.content.GetCurrentLanguage() == LocalizedContentManager.LanguageCode.zh)
+ 		{
+-			options.Add(new OptionsCheckbox("使用平滑字体", 44));
++			if (!VitaPlatform.IsVita)
++			{
++				options.Add(new OptionsCheckbox("使用平滑字体", 44));
++			}
+ 			options.Add(new OptionsSlider("对话字体大小", 45));
+ 		}
+ 		else if (Game1.content.GetCurrentLanguage() == LocalizedContentManager.LanguageCode.ru)
+@@ -157,8 +199,11 @@ public class OptionsPage : IClickableMenu
+ 		}
+ 		options.Add(new OptionsElement(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11274")));
+ 		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11275"), 16));
+-		options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11276"), 22));
+-		if (Game1.game1.IsMainInstance)
++		if (!VitaPlatform.IsVita)
++		{
++			options.Add(new OptionsCheckbox(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11276"), 22));
++		}
++		if (Game1.game1.IsMainInstance && !VitaPlatform.IsVita)
+ 		{
+ 			options.Add(new OptionsInputListener(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11277"), -1, optionSlots[0].bounds.Width));
+ 			options.Add(new OptionsInputListener(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11278"), 7, optionSlots[0].bounds.Width));
+@@ -187,6 +232,21 @@ public class OptionsPage : IClickableMenu
+ 			options.Add(new OptionsInputListener(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11299"), 30, optionSlots[0].bounds.Width));
+ 			options.Add(new OptionsInputListener(Game1.content.LoadString("Strings\\StringsFromCSFiles:OptionsPage.cs.11300"), 31, optionSlots[0].bounds.Width));
+ 		}
++		if (VitaPlatform.IsVita)
++		{
++			// Port: the Vita saves just the current screen (the map screenshot needs huge buffers).
++			options.Add(new OptionsElement(VitaPlatform.GraphicsHeaderLabel));
++			options.Add(new OptionsPlusMinus(VitaPlatform.FpsLimitLabel, VitaPlatform.FpsLimitOption, VitaPlatform.FpsLimitLabels, VitaPlatform.FpsLimitLabels));
++			options.Add(new OptionsCheckbox(VitaPlatform.NoShakeLabel, VitaPlatform.ShakeOption));
++			options.Add(new OptionsCheckbox(VitaPlatform.MinimalDebrisLabel, VitaPlatform.MinimalDebrisOption));
++			options.Add(new OptionsElement(Game1.content.LoadString("Strings\\UI:OptionsPage_ScreenshotHeader")));
++			options.Add(new OptionsButton(Game1.content.LoadString("Strings\\UI:OptionsPage_ScreenshotHeader").Replace(":", ""), delegate
++			{
++				VitaPlatform.ScreenshotRequested = true;
++				Game1.playSound("cameraNoise");
++			}));
++			return;
++		}
+ 		if (!Game1.game1.CanTakeScreenshots())
+ 		{
+ 			return;

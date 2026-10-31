@@ -1,0 +1,136 @@
+diff --git a/StardewValley.Menus/ItemGrabMenu.cs b/StardewValley.Menus/ItemGrabMenu.cs
+index 3d56cc59ebc0d355a049416d45d8ea2094f08dee..e3b850dbbd4e18db3e0f2ed7506791bfbc6be731 100644
+--- a/StardewValley.Menus/ItemGrabMenu.cs
++++ b/StardewValley.Menus/ItemGrabMenu.cs
+@@ -1162,8 +1162,87 @@ public class ItemGrabMenu : MenuWithInventory
+ 		return true;
+ 	}
+ 
++	/// <summary>Port: the chest helper's search text (Mods menu); items not matching it are dimmed and can't be taken.</summary>
++	private TextBox _vitaSearchBox;
++
++	private string _vitaSearchQuery = "";
++
++	private InventoryMenu.highlightThisItem _vitaOriginalHighlight;
++
++	/// <summary>Port: the tick Triangle opened the search, so its menu-key press doesn't also close the chest.</summary>
++	private int _vitaSearchKeyTick = -1;
++
++	private bool VitaSearchAvailable
++	{
++		get
++		{
++			if (VitaPlatform.IsVita && source == 1 && sourceItem is Chest && ItemsToGrabMenu != null && showReceivingMenu)
++			{
++				return VitaChestMod.Enabled;
++			}
++			return false;
++		}
++	}
++
++	/// <summary>Port: Triangle opens the Vita's keyboard; its text filters this chest (empty text shows everything).</summary>
++	private void VitaStartSearch()
++	{
++		if (_vitaSearchBox == null)
++		{
++			_vitaSearchBox = new TextBox(null, null, Game1.smallFont, Game1.textColor)
++			{
++				limitWidth = false,
++				textLimit = 24
++			};
++		}
++		_vitaSearchBox.Text = "";
++		Game1.keyboardDispatcher.Subscriber = _vitaSearchBox;
++		KeyboardInput.SetTextInputActive(true);
++		Game1.playSound("bigSelect");
++	}
++
++	private void VitaUpdateSearch()
++	{
++		if (_vitaSearchBox == null || ItemsToGrabMenu == null)
++		{
++			return;
++		}
++		string text = _vitaSearchBox.Text?.Trim() ?? "";
++		if (text == _vitaSearchQuery)
++		{
++			return;
++		}
++		_vitaSearchQuery = text;
++		if (_vitaOriginalHighlight == null)
++		{
++			_vitaOriginalHighlight = ItemsToGrabMenu.highlightMethod ?? InventoryMenu.highlightAllItems;
++		}
++		InventoryMenu.highlightThisItem original = _vitaOriginalHighlight;
++		ItemsToGrabMenu.highlightMethod = (text.Length == 0) ? original : ((Item item) => original(item) && VitaChestMod.Matches(item, _vitaSearchQuery));
++	}
++
++	private void VitaDrawSearch(SpriteBatch b)
++	{
++		string label = (_vitaSearchQuery.Length == 0) ? VitaChestText.Get(VitaChestText.SearchHint) : (VitaChestText.Get(VitaChestText.Search) + ": " + _vitaSearchQuery);
++		Vector2 size = Game1.smallFont.MeasureString(label);
++		int x = ItemsToGrabMenu.xPositionOnScreen + ItemsToGrabMenu.width - (int)size.X - 8;
++		int y = ItemsToGrabMenu.yPositionOnScreen - IClickableMenu.borderWidth - IClickableMenu.spaceToClearTopBorder + storageSpaceTopBorderOffset - (int)size.Y - 20;
++		if (y < 4)
++		{
++			y = 4;
++		}
++		IClickableMenu.drawTextureBox(b, Game1.mouseCursors, new Rectangle(432, 439, 9, 9), x - 16, y - 8, (int)size.X + 32, (int)size.Y + 16, Color.White, 4f, drawShadow: false);
++		Utility.drawTextWithShadow(b, label, Game1.smallFont, new Vector2(x, y), Game1.textColor);
++	}
++
+ 	public override void receiveGamePadButton(Buttons button)
+ 	{
++		if (button == Buttons.Y && VitaSearchAvailable)
++		{
++			_vitaSearchKeyTick = Game1.ticks;
++			VitaStartSearch();
++			return;
++		}
+ 		base.receiveGamePadButton(button);
+ 		switch (button)
+ 		{
+@@ -1226,6 +1305,10 @@ public class ItemGrabMenu : MenuWithInventory
+ 
+ 	public override void receiveKeyPress(Keys key)
+ 	{
++		if (_vitaSearchKeyTick == Game1.ticks && Game1.options.doesInputListContain(Game1.options.menuButton, key))
++		{
++			return;
++		}
+ 		if (Game1.options.snappyMenus && Game1.options.gamepadControls)
+ 		{
+ 			applyMovementKey(key);
+@@ -1284,6 +1367,10 @@ public class ItemGrabMenu : MenuWithInventory
+ 			poof = null;
+ 		}
+ 		chestColorPicker?.update(time);
++		if (_vitaSearchBox != null)
++		{
++			VitaUpdateSearch();
++		}
+ 		if (sourceItem is Chest chest && _sourceItemInCurrentLocation)
+ 		{
+ 			Vector2 tileLocation = chest.tileLocation.Value;
+@@ -1437,6 +1524,10 @@ public class ItemGrabMenu : MenuWithInventory
+ 			specialButton?.draw(b);
+ 		}
+ 		chestColorPicker?.draw(b);
++		if (VitaSearchAvailable)
++		{
++			VitaDrawSearch(b);
++		}
+ 		organizeButton?.draw(b);
+ 		fillStacksButton?.draw(b);
+ 		junimoNoteIcon?.draw(b);
+@@ -1466,6 +1557,10 @@ public class ItemGrabMenu : MenuWithInventory
+ 
+ 	protected override void cleanupBeforeExit()
+ 	{
++		if (_vitaSearchBox != null && Game1.keyboardDispatcher.Subscriber == _vitaSearchBox)
++		{
++			Game1.keyboardDispatcher.Subscriber = null;
++		}
+ 		base.cleanupBeforeExit();
+ 		if (superEssential)
+ 		{

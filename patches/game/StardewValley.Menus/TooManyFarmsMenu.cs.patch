@@ -1,0 +1,13 @@
+diff --git a/StardewValley.Menus/TooManyFarmsMenu.cs b/StardewValley.Menus/TooManyFarmsMenu.cs
+index 3d83a9860d601d3479441e62f39807712be82689..d8445167e18f05f7bea4ea22a4ad69e8916ee927 100644
+--- a/StardewValley.Menus/TooManyFarmsMenu.cs
++++ b/StardewValley.Menus/TooManyFarmsMenu.cs
+@@ -46,7 +46,7 @@ public class TooManyFarmsMenu : IClickableMenu
+ 		SpriteText.drawString(b, message, xPositionOnScreen + pad, yPositionOnScreen + pad, 999999, width, height);
+ 		int ypos = 260;
+ 		Rectangle dstRect = new Rectangle(xPositionOnScreen + width - 14 - 52, yPositionOnScreen + height - 14 - 52, 52, 52);
+-		Rectangle srcRect = new Rectangle(542, ypos, 26, 26);
++		Rectangle srcRect = Utility.controllerMapSourceRect(new Rectangle(542, ypos, 26, 26));
+ 		if (Game1.options.gamepadControls)
+ 		{
+ 			b.Draw(Game1.controllerMaps, dstRect, srcRect, Color.White);

@@ -1,0 +1,39 @@
+diff --git a/StardewValley.TerrainFeatures/HoeDirt.cs b/StardewValley.TerrainFeatures/HoeDirt.cs
+index 72cc3ff7d277e2196b7f010865d29cccc233e1ef..facb2654f01691383a4b89d67ab7386243ea5e0f 100644
+--- a/StardewValley.TerrainFeatures/HoeDirt.cs
++++ b/StardewValley.TerrainFeatures/HoeDirt.cs
+@@ -243,6 +243,16 @@ public class HoeDirt : TerrainFeature
+ 		state.fieldChangeVisibleEvent += (NetInt x, int y, int z) =>
+ 		{
+ 			OnAdded(Location, Tile);
++			VitaTouch();
++		};
++		// Port: watering, fertilizer and colour change the cached soil picture (Game1.VitaPrepareGroundCache).
++		fertilizer.fieldChangeVisibleEvent += delegate
++		{
++			VitaTouch();
++		};
++		c.fieldChangeVisibleEvent += delegate
++		{
++			VitaTouch();
+ 		};
+ 		netCrop.fieldChangeVisibleEvent += (NetRef<Crop> x, Crop y, Crop z) =>
+ 		{
+@@ -1240,6 +1250,17 @@ public class HoeDirt : TerrainFeature
+ 		drawSum = (byte)(neighborMask & 0xF);
+ 		sourceRectPosition = drawGuide[drawSum];
+ 		wateredRectPosition = drawGuide[wateredNeighborMask];
++		VitaTouch();
++	}
++
++	/// <summary>Port: marks the location's terrain as changed for Game1's cached soil picture (what this draws changed without a terrain feature being added or removed).</summary>
++	private void VitaTouch()
++	{
++		GameLocation location = Location;
++		if (location != null)
++		{
++			location.VitaTerrainVersion++;
++		}
+ 	}
+ 
+ 	public void OnNeighborAdded(byte direction, int neighborState)

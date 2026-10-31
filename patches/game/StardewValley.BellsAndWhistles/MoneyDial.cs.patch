@@ -1,0 +1,27 @@
+diff --git a/StardewValley.BellsAndWhistles/MoneyDial.cs b/StardewValley.BellsAndWhistles/MoneyDial.cs
+index e2962022e70371c406ebbe50749d9b683060b8b9..5cf40be56fbdfc0f1ded416764641d4aae3a54dc 100644
+--- a/StardewValley.BellsAndWhistles/MoneyDial.cs
++++ b/StardewValley.BellsAndWhistles/MoneyDial.cs
+@@ -61,7 +61,7 @@ public class MoneyDial
+ 		}
+ 		if (moneyShineTimer > 0 && currentValue == target)
+ 		{
+-			moneyShineTimer -= Game1.currentGameTime.ElapsedGameTime.Milliseconds;
++			moneyShineTimer -= Utility.ElapsedMs(Game1.currentGameTime.ElapsedGameTime);
+ 		}
+ 		if (moneyMadeAccumulator > 0)
+ 		{
+@@ -122,7 +122,12 @@ public class MoneyDial
+ 			}
+ 		}
+ 		int xPosition = 0;
+-		int digitStrip = (int)Math.Pow(10.0, numDigits - 1);
++		// Port: integer power of ten (exact), no double Math.Pow per frame.
++		int digitStrip = 1;
++		for (int p10 = 1; p10 < numDigits; p10++)
++		{
++			digitStrip *= 10;
++		}
+ 		bool significant = false;
+ 		for (int j = 0; j < numDigits; j++)
+ 		{

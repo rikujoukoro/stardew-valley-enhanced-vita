@@ -1,0 +1,73 @@
+diff --git a/StardewValley.Menus/CoopMenu.cs b/StardewValley.Menus/CoopMenu.cs
+index 15df0e695637a478be3eef1557f00f3b8c7fe7a4..fe8abd02979170645d77d0fae88b034f069704c1 100644
+--- a/StardewValley.Menus/CoopMenu.cs
++++ b/StardewValley.Menus/CoopMenu.cs
+@@ -296,6 +296,8 @@ public class CoopMenu : LoadGameMenu
+ 
+ 	public bool tooManyFarms;
+ 
++	private bool _hasLoadedHostFiles;
++
+ 	private readonly bool _splitScreen;
+ 
+ 	public static string lastEnteredInviteCode;
+@@ -425,7 +427,12 @@ public class CoopMenu : LoadGameMenu
+ 		}
+ 		isSetUp = true;
+ 		Game1.mouseCursor = 0;
+-		base.startListPopulation(Filter);
++		if (!_hasLoadedHostFiles && (_splitScreen || currentTab == Tab.HOST_TAB))
++		{
++			_hasLoadedHostFiles = true;
++			base.startListPopulation(Filter);
++		}
++		UpdateButtons();
+ 		populateClickableComponentList();
+ 	}
+ 
+@@ -690,18 +697,18 @@ public class CoopMenu : LoadGameMenu
+ 
+ 	private void enterIPPressed()
+ 	{
+-		string last_entered_ip = "";
++		string default_text = "";
+ 		try
+ 		{
+ 			StartupPreferences startupPreferences = new StartupPreferences();
+ 			startupPreferences.loadPreferences(async: false, applyLanguage: false);
+-			last_entered_ip = startupPreferences.lastEnteredIP;
++			default_text = startupPreferences.lastEnteredIP;
+ 		}
+ 		catch (Exception)
+ 		{
+ 		}
+ 		string title = Game1.content.LoadString("Strings\\UI:CoopMenu_EnterIP");
+-		setMenu(new TitleTextInputMenu(title, (string address) =>
++		setMenu(new TitleTextInputMenu(title, delegate(string address)
+ 		{
+ 			try
+ 			{
+@@ -718,7 +725,7 @@ public class CoopMenu : LoadGameMenu
+ 				address = "localhost";
+ 			}
+ 			setMenu(new FarmhandMenu(Game1.multiplayer.InitClient(new LidgrenClient(address))));
+-		}, last_entered_ip, "join_menu", filterInput: false));
++		}, default_text, "join_menu", filterInput: false));
+ 	}
+ 
+ 	private void enterInviteCodePressed()
+@@ -757,7 +764,13 @@ public class CoopMenu : LoadGameMenu
+ 
+ 	public virtual void SetTab(Tab newTab, bool playSound = true)
+ 	{
+-		if (currentTab == newTab)
++		if (!_hasLoadedHostFiles && newTab == Tab.HOST_TAB)
++		{
++			_hasLoadedHostFiles = true;
++			base.startListPopulation(Filter);
++		}
++		bool forced = !isSetUp;
++		if (currentTab == newTab && !forced)
+ 		{
+ 			return;
+ 		}

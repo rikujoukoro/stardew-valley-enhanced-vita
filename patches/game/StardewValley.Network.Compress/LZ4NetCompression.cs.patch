@@ -1,0 +1,122 @@
+diff --git a/StardewValley.Network.Compress/LZ4NetCompression.cs b/StardewValley.Network.Compress/LZ4NetCompression.cs
+index 4444c3993dc0a8e2b3278781470e6a5f07cb7de6..7d2b86f43bf4a4d04c6c36b5b8f8f0b69b59e33c 100644
+--- a/StardewValley.Network.Compress/LZ4NetCompression.cs
++++ b/StardewValley.Network.Compress/LZ4NetCompression.cs
+@@ -1,7 +1,5 @@
+ using System;
+ using System.IO;
+-using System.Runtime.InteropServices;
+-using LWJGL;
+ 
+ namespace StardewValley.Network.Compress;
+ 
+@@ -11,26 +9,40 @@ internal class LZ4NetCompression : INetCompression
+ 
+ 	public byte[] CompressAbove(byte[] data, int minSizeToCompress = 256)
+ 	{
+-		if (data.Length < minSizeToCompress)
++		if (data == null || data.Length < minSizeToCompress)
+ 		{
+ 			return data;
+ 		}
+-		int destSize = LZ4.CompressBound(data.Length);
+-		IntPtr intPtr = Marshal.AllocHGlobal(destSize + 9);
+-		IntPtr dest = IntPtr.Add(intPtr, 9);
+-		int compressedSize = LZ4.CompressDefault(data, dest, data.Length, destSize);
+-		Marshal.WriteByte(intPtr, 0, 127);
+-		Marshal.WriteInt32(intPtr, 1, compressedSize);
+-		Marshal.WriteInt32(intPtr, 5, data.Length);
+-		byte[] compressed = new byte[compressedSize + 9];
+-		Marshal.Copy(intPtr, compressed, 0, compressed.Length);
+-		Marshal.FreeHGlobal(intPtr);
+-		return compressed;
++
++		int maxDst = data.Length + (data.Length / 255) + 16;
++		byte[] dst = new byte[maxDst + HeaderSize];
++
++		int compressedLen = LZ4Codec.Compress(data, 0, data.Length, dst, HeaderSize, maxDst);
++		if (compressedLen <= 0 || compressedLen >= data.Length)
++		{
++			return data;
++		}
++
++		dst[0] = 127;
++		dst[1] = (byte)(compressedLen & 0xFF);
++		dst[2] = (byte)((compressedLen >> 8) & 0xFF);
++		dst[3] = (byte)((compressedLen >> 16) & 0xFF);
++		dst[4] = (byte)((compressedLen >> 24) & 0xFF);
++
++		int uncompressedLen = data.Length;
++		dst[5] = (byte)(uncompressedLen & 0xFF);
++		dst[6] = (byte)((uncompressedLen >> 8) & 0xFF);
++		dst[7] = (byte)((uncompressedLen >> 16) & 0xFF);
++		dst[8] = (byte)((uncompressedLen >> 24) & 0xFF);
++
++		byte[] result = new byte[compressedLen + HeaderSize];
++		Buffer.BlockCopy(dst, 0, result, 0, result.Length);
++		return result;
+ 	}
+ 
+ 	public byte[] DecompressBytes(byte[] data)
+ 	{
+-		if (data[0] != 127)
++		if (data == null || data.Length < HeaderSize || data[0] != 127)
+ 		{
+ 			return data;
+ 		}
+@@ -44,29 +56,39 @@ internal class LZ4NetCompression : INetCompression
+ 		{
+ 			throw new ArgumentException("dataStream must support both reading and seeking");
+ 		}
+-		long startPosition = dataStream.Position;
+-		if ((byte)dataStream.ReadByte() != 127)
++
++		long position = dataStream.Position;
++		int marker = dataStream.ReadByte();
++		if (marker != 127)
+ 		{
+-			dataStream.Seek(startPosition, SeekOrigin.Begin);
++			dataStream.Seek(position, SeekOrigin.Begin);
+ 			return false;
+ 		}
+-		byte[] compressedSizeHeader = new byte[4];
+-		dataStream.Read(compressedSizeHeader, 0, 4);
+-		int compressedSize = BitConverter.ToInt32(compressedSizeHeader, 0);
+-		byte[] data = new byte[compressedSize + 9];
+-		dataStream.Read(data, 5, 4 + compressedSize);
+-		decompressed = DecompressImpl(data);
++
++		byte[] header = new byte[8];
++		dataStream.Read(header, 0, 8);
++		int compressedLen = BitConverter.ToInt32(header, 0);
++		int uncompressedLen = BitConverter.ToInt32(header, 4);
++
++		byte[] compressedData = new byte[compressedLen];
++		int bytesRead = 0;
++		while (bytesRead < compressedLen)
++		{
++			int r = dataStream.Read(compressedData, bytesRead, compressedLen - bytesRead);
++			if (r <= 0) break;
++			bytesRead += r;
++		}
++
++		decompressed = new byte[uncompressedLen];
++		LZ4Codec.Decompress(compressedData, 0, compressedLen, decompressed, 0, uncompressedLen);
+ 		return true;
+ 	}
+ 
+-	private unsafe byte[] DecompressImpl(byte[] data)
++	private byte[] DecompressImpl(byte[] data)
+ 	{
+-		int decompressedSize = BitConverter.ToInt32(data, 5);
+-		byte[] decompressed = new byte[decompressedSize];
+-		fixed (byte* ptr = data)
+-		{
+-			LZ4.DecompressSafe(IntPtr.Add((IntPtr)ptr, 9), decompressed, data.Length - 9, decompressedSize);
+-		}
++		int uncompressedLen = BitConverter.ToInt32(data, 5);
++		byte[] decompressed = new byte[uncompressedLen];
++		LZ4Codec.Decompress(data, HeaderSize, data.Length - HeaderSize, decompressed, 0, uncompressedLen);
+ 		return decompressed;
+ 	}
+ }

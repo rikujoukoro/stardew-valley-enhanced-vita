@@ -1,0 +1,75 @@
+diff --git a/src/Game.cs b/src/Game.cs
+index 98cf86267ce78cdac48e9b161f3cbeb396195c13..88c0b12cf25c4ee83ed3b1a304cc4d1025cbc32f 100644
+--- a/src/Game.cs
++++ b/src/Game.cs
+@@ -199,7 +199,17 @@ namespace Microsoft.Xna.Framework
+ 		private readonly GameTime gameTime;
+ 		private Stopwatch gameTimer;
+ 		private TimeSpan accumulatedElapsedTime;
++
++		/* Vita port: drop a small update debt instead of catching up (see Tick); set by the game. */
++		public static bool VitaElasticTimestep;
++		private long vitaDropWindowStart;
++		private TimeSpan vitaDroppedThisWindow;
++		private static readonly TimeSpan vitaDropBudget = TimeSpan.FromMilliseconds(34);
++		/* Behind by this many steps or more (~50 ms at 60 Hz) is a hitch, not a slow frame (see Tick). */
++		private const int VitaHitchSteps = 3;
+ 		private long previousTicks = 0;
++		private static readonly bool isDirectStopwatchFrequency = (Stopwatch.Frequency == TimeSpan.TicksPerSecond);
++		private static readonly double stopwatchTickRatio = (double)TimeSpan.TicksPerSecond / Stopwatch.Frequency;
+ 		private int updateFrameLag;
+ 		private bool forceElapsedTimeToZero = false;
+ 
+@@ -473,6 +483,41 @@ namespace Microsoft.Xna.Framework
+ 				gameTime.ElapsedGameTime = TargetElapsedTime;
+ 				int stepCount = 0;
+ 
++				/* Vita port: a frame that came a little late would be followed by two updates, which makes
++				 * that frame late too, and the game settled at ~46 fps with every third frame doing two
++				 * updates although one update and one draw fit in 16.7 ms. A small debt (less than half a
++				 * step over one) is dropped instead while that costs no more than 30 ms of game time a
++				 * second; behind by more, the game catches up as before.
++				 */
++				if (VitaElasticTimestep)
++				{
++					long now = gameTimer.ElapsedTicks;
++					if (now - vitaDropWindowStart >= System.Diagnostics.Stopwatch.Frequency)
++					{
++						vitaDropWindowStart = now;
++						vitaDroppedThisWindow = TimeSpan.Zero;
++					}
++					TimeSpan debt = accumulatedElapsedTime - TargetElapsedTime;
++					if (	debt >= TargetElapsedTime &&
++						debt < TargetElapsedTime + TimeSpan.FromTicks(TargetElapsedTime.Ticks / 2) &&
++						vitaDroppedThisWindow < vitaDropBudget	)
++					{
++						TimeSpan dropped = debt - TimeSpan.FromTicks(debt.Ticks % TargetElapsedTime.Ticks);
++						accumulatedElapsedTime -= dropped;
++						vitaDroppedThisWindow += dropped;
++					}
++					else if (debt >= TimeSpan.FromTicks(TargetElapsedTime.Ticks * VitaHitchSteps))
++					{
++						/* A hitch (a 50-400 ms update: the ten-minute clock, a texture read from the
++						 * card): catching up ran 3-20 more updates before the next frame, which
++						 * lengthened the freeze by up to a third and then jumped the world ahead.
++						 * The game time it lost is dropped instead: the picture resumes where it
++						 * froze. Not budgeted, since hitches are seconds apart.
++						 */
++						accumulatedElapsedTime = TargetElapsedTime + TimeSpan.FromTicks(debt.Ticks % TargetElapsedTime.Ticks);
++					}
++				}
++
+ 				// Perform as many full fixed length time steps as we can.
+ 				while (accumulatedElapsedTime >= TargetElapsedTime)
+ 				{
+@@ -864,7 +909,9 @@ namespace Microsoft.Xna.Framework
+ 
+ 		private TimeSpan AdvanceElapsedTime()
+ 		{
+-			long currentTicks = gameTimer.Elapsed.Ticks;
++			// Vita port: Avoid Stopwatch.Elapsed 64-bit software division (__emul_ldiv) on ARM32
++			long rawTicks = gameTimer.ElapsedTicks;
++			long currentTicks = isDirectStopwatchFrequency ? rawTicks : (long)(rawTicks * stopwatchTickRatio);
+ 			TimeSpan timeAdvanced = TimeSpan.FromTicks(currentTicks - previousTicks);
+ 			accumulatedElapsedTime += timeAdvanced;
+ 			previousTicks = currentTicks;

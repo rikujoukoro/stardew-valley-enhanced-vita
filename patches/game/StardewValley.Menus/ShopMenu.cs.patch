@@ -1,0 +1,12 @@
+diff --git a/StardewValley.Menus/ShopMenu.cs b/StardewValley.Menus/ShopMenu.cs
+index 2a099a11119f2aeb83a07dbbbde2385ff858bb28..15750e553109e02c8c293f8b179982480cee43ba 100644
+--- a/StardewValley.Menus/ShopMenu.cs
++++ b/StardewValley.Menus/ShopMenu.cs
+@@ -282,6 +282,7 @@ public class ShopMenu : IClickableMenu
+ 
+ 	private void Initialize(int currency, OnPurchaseDelegate onPurchase, Func<ISalable, bool> onSell, bool playOpenSound)
+ 	{
++		VitaTractorMod.AddShopStock(this);
+ 		ShopCachedTheme theme = VisualTheme;
+ 		updatePosition();
+ 		upperRightCloseButton = new ClickableTextureComponent(new Rectangle(xPositionOnScreen + width - 36, yPositionOnScreen - 8, 48, 48), Game1.mouseCursors, new Rectangle(337, 494, 12, 12), 4f);

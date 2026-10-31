@@ -1,0 +1,196 @@
+diff --git a/StardewValley/NPC.cs b/StardewValley/NPC.cs
+index 3455b517cd27542b93b149e67c9dab9d1fe205d3..ad03573e00189f6bdaa0242b2db4129b8880317e 100644
+--- a/StardewValley/NPC.cs
++++ b/StardewValley/NPC.cs
+@@ -492,6 +492,10 @@ public class NPC : Character, IComparable
+ 	{
+ 		get
+ 		{
++			if (portrait == null && _vitaPendingPortrait != null)
++			{
++				LoadPendingPortrait();
++			}
+ 			if (portrait == null && IsVillager)
+ 			{
+ 				ChooseAppearance();
+@@ -501,6 +505,32 @@ public class NPC : Character, IComparable
+ 		set
+ 		{
+ 			portrait = value;
++			_vitaPendingPortrait = null;
++			_vitaPendingPortraitContent = null;
++		}
++	}
++
++	/// <summary>Port: on the Vita, the portrait asset <see cref="M:StardewValley.NPC.TryLoadPortraits(System.String,System.String@,StardewValley.LocalizedContentManager)" /> chose, loaded the first time <see cref="P:StardewValley.NPC.Portrait" /> is read.</summary>
++	/// <remarks>An NPC picks its appearance whenever it changes location, mostly off screen; reading a portrait sheet from the memory card then stalled a frame for no portrait anyone would see.</remarks>
++	private string _vitaPendingPortrait;
++
++	/// <summary>Port: the content manager to load <see cref="F:StardewValley.NPC._vitaPendingPortrait" /> with.</summary>
++	private LocalizedContentManager _vitaPendingPortraitContent;
++
++	private void LoadPendingPortrait()
++	{
++		string assetName = _vitaPendingPortrait;
++		LocalizedContentManager content = _vitaPendingPortraitContent ?? Game1.content;
++		_vitaPendingPortrait = null;
++		_vitaPendingPortraitContent = null;
++		try
++		{
++			portrait = content.Load<Texture2D>(assetName);
++			portrait.Name = assetName;
++		}
++		catch (Exception ex)
++		{
++			Game1.log.Warn("NPC " + Name + " can't load portraits from '" + assetName + "': " + ex);
+ 		}
+ 	}
+ 
+@@ -1173,7 +1203,7 @@ public class NPC : Character, IComparable
+ 			error = "the asset name is empty";
+ 			return false;
+ 		}
+-		if (((GraphicsResource)portrait)?.Name == assetName && !portrait.IsDisposed)
++		if ((portrait?.Name == assetName && !portrait.IsDisposed) || _vitaPendingPortrait == assetName)
+ 		{
+ 			error = null;
+ 			return true;
+@@ -1184,6 +1214,15 @@ public class NPC : Character, IComparable
+ 		}
+ 		try
+ 		{
++			if (VitaPlatform.IsVita && content.DoesAssetExist<Texture2D>(assetName))
++			{
++				// Port: loaded when first shown (see _vitaPendingPortrait).
++				portrait = null;
++				_vitaPendingPortrait = assetName;
++				_vitaPendingPortraitContent = content;
++				error = null;
++				return true;
++			}
+ 			portrait = content.Load<Texture2D>(assetName);
+ 			portrait.Name = assetName;
+ 			error = null;
+@@ -3129,7 +3168,7 @@ public class NPC : Character, IComparable
+ 		}
+ 		if (Game1.IsMasterGame && currentScheduleDelay > 0f)
+ 		{
+-			currentScheduleDelay -= (float)time.ElapsedGameTime.TotalSeconds;
++			currentScheduleDelay -= StardewValley.Character.ElapsedTotalSecF(time);
+ 			if (currentScheduleDelay <= 0f)
+ 			{
+ 				currentScheduleDelay = -1f;
+@@ -3238,11 +3277,11 @@ public class NPC : Character, IComparable
+ 		{
+ 			if (textAboveHeadPreTimer > 0)
+ 			{
+-				textAboveHeadPreTimer -= time.ElapsedGameTime.Milliseconds;
++				textAboveHeadPreTimer -= StardewValley.Character.ElapsedMs(time);
+ 			}
+ 			else
+ 			{
+-				textAboveHeadTimer -= time.ElapsedGameTime.Milliseconds;
++				textAboveHeadTimer -= StardewValley.Character.ElapsedMs(time);
+ 				if (textAboveHeadTimer > 500)
+ 				{
+ 					textAboveHeadAlpha = Math.Min(1f, textAboveHeadAlpha + 0.1f);
+@@ -3264,7 +3303,7 @@ public class NPC : Character, IComparable
+ 		if (movementPause > 0 && (!Game1.dialogueUp || controller != null))
+ 		{
+ 			freezeMotion = true;
+-			movementPause -= time.ElapsedGameTime.Milliseconds;
++			movementPause -= StardewValley.Character.ElapsedMs(time);
+ 			if (movementPause <= 0)
+ 			{
+ 				freezeMotion = false;
+@@ -3272,11 +3311,11 @@ public class NPC : Character, IComparable
+ 		}
+ 		if (shakeTimer > 0)
+ 		{
+-			shakeTimer -= time.ElapsedGameTime.Milliseconds;
++			shakeTimer -= StardewValley.Character.ElapsedMs(time);
+ 		}
+ 		if (lastPosition.Equals(Position))
+ 		{
+-			timerSinceLastMovement += time.ElapsedGameTime.Milliseconds;
++			timerSinceLastMovement += StardewValley.Character.ElapsedMs(time);
+ 		}
+ 		else
+ 		{
+@@ -3286,7 +3325,7 @@ public class NPC : Character, IComparable
+ 		{
+ 			yOffset = (float)(Math.Cos(time.TotalGameTime.TotalMilliseconds / 2000.0) * 4.0);
+ 			float oldSwimTimer = swimTimer;
+-			swimTimer -= time.ElapsedGameTime.Milliseconds;
++			swimTimer -= StardewValley.Character.ElapsedMs(time);
+ 			if (timerSinceLastMovement == 0f)
+ 			{
+ 				if (oldSwimTimer > 400f && swimTimer <= 400f && location.Equals(Game1.currentLocation))
+@@ -5965,11 +6004,21 @@ public class NPC : Character, IComparable
+ 		{
+ 			return false;
+ 		}
+-		foreach (Farmer f in Game1.getAllFarmers())
++		string myName = Name;
++		Farmer master = Game1.MasterPlayer;
++		if (master != null && master.spouse != null && master.spouse == myName && !master.isEngaged())
+ 		{
+-			if (f.spouse != null && f.spouse == Name && !f.isEngaged())
++			return true;
++		}
++		if (Game1.netWorldState?.Value?.farmhandData != null && Game1.netWorldState.Value.farmhandData.Count() > 0)
++		{
++			foreach (Farmer farmer in Game1.netWorldState.Value.farmhandData.Values)
+ 			{
+-				return true;
++				Farmer f = (farmer.isActive() && Game1.otherFarmers.TryGetValue(farmer.UniqueMultiplayerID, out var activeFarmer)) ? activeFarmer : farmer;
++				if (f.spouse != null && f.spouse == myName && !f.isEngaged())
++				{
++					return true;
++				}
+ 			}
+ 		}
+ 		return false;
+@@ -5981,11 +6030,21 @@ public class NPC : Character, IComparable
+ 		{
+ 			return false;
+ 		}
+-		foreach (Farmer f in Game1.getAllFarmers())
++		string myName = Name;
++		Farmer master = Game1.MasterPlayer;
++		if (master != null && master.spouse != null && master.spouse == myName)
+ 		{
+-			if (f.spouse != null && f.spouse == Name)
++			return true;
++		}
++		if (Game1.netWorldState?.Value?.farmhandData != null && Game1.netWorldState.Value.farmhandData.Count() > 0)
++		{
++			foreach (Farmer farmer in Game1.netWorldState.Value.farmhandData.Values)
+ 			{
+-				return true;
++				Farmer f = (farmer.isActive() && Game1.otherFarmers.TryGetValue(farmer.UniqueMultiplayerID, out var activeFarmer)) ? activeFarmer : farmer;
++				if (f.spouse != null && f.spouse == myName)
++				{
++					return true;
++				}
+ 			}
+ 		}
+ 		return false;
+@@ -6857,7 +6916,7 @@ public class NPC : Character, IComparable
+ 
+ 	public override bool shouldCollideWithBuildingLayer(GameLocation location)
+ 	{
+-		if (isMarried() && (Schedule == null || location is FarmHouse))
++		if ((Schedule == null || location is FarmHouse) && isMarried())
+ 		{
+ 			return true;
+ 		}
+@@ -7094,7 +7153,7 @@ public class NPC : Character, IComparable
+ 		{
+ 			SetMovingOnlyUp();
+ 		}
+-		squarePauseAccumulation += time.ElapsedGameTime.Milliseconds;
++		squarePauseAccumulation += StardewValley.Character.ElapsedMs(time);
+ 		if (squarePauseAccumulation >= squarePauseTotal && endRect.Contains(boundingBox))
+ 		{
+ 			nextSquarePosition = Vector2.Zero;

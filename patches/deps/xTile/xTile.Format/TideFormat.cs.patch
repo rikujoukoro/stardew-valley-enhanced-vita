@@ -1,0 +1,45 @@
+diff --git a/xTile.Format/TideFormat.cs b/xTile.Format/TideFormat.cs
+index 619bc2eba793421489c0e44304515b53b0dda46c..6b9d1a3641b23efda119f762e1bd0b279290b00c 100644
+--- a/xTile.Format/TideFormat.cs
++++ b/xTile.Format/TideFormat.cs
+@@ -114,9 +114,9 @@ internal class TideFormat : IMapFormat
+ 
+ 	private StaticTile LoadStaticTile(XmlHelper xmlHelper, Layer layer, TileSheet tileSheet)
+ 	{
+-		int intAttribute = xmlHelper.GetIntAttribute("Index");
++		int ıntAttribute = xmlHelper.GetIntAttribute("Index");
+ 		BlendMode blendMode = ((!(xmlHelper.GetAttribute("BlendMode") == BlendMode.Alpha.ToString())) ? BlendMode.Additive : BlendMode.Alpha);
+-		StaticTile staticTile = new StaticTile(layer, tileSheet, blendMode, intAttribute);
++		StaticTile staticTile = new StaticTile(layer, tileSheet, blendMode, ıntAttribute);
+ 		if (!xmlHelper.XmlReader.IsEmptyElement)
+ 		{
+ 			LoadProperties(xmlHelper, staticTile);
+@@ -139,7 +139,7 @@ internal class TideFormat : IMapFormat
+ 
+ 	private AnimatedTile LoadAnimatedTile(XmlHelper xmlHelper, Layer layer, TileSheet tileSheet)
+ 	{
+-		int intAttribute = xmlHelper.GetIntAttribute("Interval");
++		int ıntAttribute = xmlHelper.GetIntAttribute("Interval");
+ 		xmlHelper.AdvanceStartElement("Frames");
+ 		Map map = layer.Map;
+ 		List<StaticTile> list = new List<StaticTile>();
+@@ -155,7 +155,7 @@ internal class TideFormat : IMapFormat
+ 				tileSheet = map.GetTileSheet(attribute);
+ 			}
+ 		}
+-		AnimatedTile animatedTile = new AnimatedTile(layer, list.ToArray(), intAttribute);
++		AnimatedTile animatedTile = new AnimatedTile(layer, list.ToArray(), ıntAttribute);
+ 		if (xmlHelper.AdvanceNode() != XmlNodeType.EndElement)
+ 		{
+ 			LoadProperties(xmlHelper, animatedTile);
+@@ -277,8 +277,8 @@ internal class TideFormat : IMapFormat
+ 			{
+ 				if (xmlReader.Name == "Null")
+ 				{
+-					int intAttribute = xmlHelper.GetIntAttribute("Count");
+-					origin.X += intAttribute % layerSize.Width;
++					int ıntAttribute = xmlHelper.GetIntAttribute("Count");
++					origin.X += ıntAttribute % layerSize.Width;
+ 				}
+ 				else if (xmlReader.Name == "TileSheet")
+ 				{

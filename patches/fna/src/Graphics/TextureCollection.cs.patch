@@ -1,0 +1,31 @@
+diff --git a/src/Graphics/TextureCollection.cs b/src/Graphics/TextureCollection.cs
+index fcca08527b0b07a953bf181d8ffd066a52c144bf..e7b6ecf5306e6def158a2a453136d81ec4cb458e 100644
+--- a/src/Graphics/TextureCollection.cs
++++ b/src/Graphics/TextureCollection.cs
+@@ -55,7 +55,7 @@ namespace Microsoft.Xna.Framework.Graphics
+ 					throw new ArgumentOutOfRangeException("index");
+ 				}
+ 				textures[index] = value;
+-				modifiedSamplers[index] = true;
++				modifiedSamplers[0] |= 1 << index; // Vita port: mark only this slot dirty
+ 			}
+ 		}
+ 
+@@ -70,7 +70,7 @@ namespace Microsoft.Xna.Framework.Graphics
+ 		#region Private Variables
+ 
+ 		private readonly Texture[] textures;
+-		private readonly bool[] modifiedSamplers;
++		private readonly int[] modifiedSamplers;
+ 
+ 		#endregion
+ 
+@@ -78,7 +78,7 @@ namespace Microsoft.Xna.Framework.Graphics
+ 
+ 		internal TextureCollection(
+ 			int slots,
+-			bool[] modSamplers
++			int[] modSamplers
+ 		) {
+ 			textures = new Texture[slots];
+ 			modifiedSamplers = modSamplers;

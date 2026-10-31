@@ -1,0 +1,177 @@
+diff --git a/StardewValley.BellsAndWhistles/SpriteText.cs b/StardewValley.BellsAndWhistles/SpriteText.cs
+index b32f561cbe72a883999e57f35675695988ba9818..9b3a737009d8ecb753edd045d81a60c0c10434c5 100644
+--- a/StardewValley.BellsAndWhistles/SpriteText.cs
++++ b/StardewValley.BellsAndWhistles/SpriteText.cs
+@@ -475,16 +475,27 @@ public class SpriteText
+ 		drawString(b, s, x, y, 999999, -1, 999999, alpha, 0.88f, junimoText: false, 0, placeHolderWidthText, color, scroll_text_alignment);
+ 	}
+ 
++	private static bool _subscribedToLanguageChange;
++
+ 	private static FontFile loadFont(string assetName)
+ 	{
+-		return FontLoader.Parse(Game1.content.Load<XmlSource>(assetName).Source);
++		string source = Game1.content.Load<XmlSource>(assetName).Source;
++		if (VitaPlatform.IsVita)
++		{
++			Game1.content.VitaForgetAsset(assetName, dispose: true);
++		}
++		return FontLoader.Parse(source);
+ 	}
+ 
+ 	private static void setUpCharacterMap()
+ 	{
+ 		if (!LocalizedContentManager.CurrentLanguageLatin && characterMap == null)
+ 		{
+-			LocalizedContentManager.OnLanguageChange += OnLanguageChange;
++			if (!_subscribedToLanguageChange)
++			{
++				_subscribedToLanguageChange = true;
++				LocalizedContentManager.OnLanguageChange += OnLanguageChange;
++			}
+ 			LoadFontData(LocalizedContentManager.CurrentLanguageCode);
+ 		}
+ 	}
+@@ -722,8 +733,15 @@ public class SpriteText
+ 		}
+ 	}
+ 
++	/// <summary>Port: while set, '+' is drawn from the language font instead of the farmer-head icon (Vita menu help: "L + R + Up").</summary>
++	internal static bool VitaPlainPlus;
++
+ 	private static bool IsSpecialCharacter(char c)
+ 	{
++		if (VitaPlainPlus && c == '+')
++		{
++			return false;
++		}
+ 		if (!c.Equals('<') && !c.Equals('=') && !c.Equals('>') && !c.Equals('@') && !c.Equals('$') && !c.Equals('`'))
+ 		{
+ 			return c.Equals('+');
+@@ -731,8 +749,37 @@ public class SpriteText
+ 		return true;
+ 	}
+ 
++	/// <summary>Port: releases the previous non-Latin language's BmFont data and page references before a language change.</summary>
++	public static void VitaReleaseFontData()
++	{
++		characterMap?.Clear();
++		characterMap = null;
++		if (fontPages != null)
++		{
++			foreach (Texture2D page in fontPages)
++			{
++				try
++				{
++					page?.Dispose();
++				}
++				catch
++				{
++				}
++			}
++			fontPages.Clear();
++			fontPages = null;
++		}
++		FontFile = null;
++		fontPixelZoom = 3f;
++	}
++
+ 	private static void OnLanguageChange(LocalizedContentManager.LanguageCode code)
+ 	{
++		if (VitaPlatform.IsVita)
++		{
++			VitaReleaseFontData();
++			return;
++		}
+ 		LoadFontData(code);
+ 	}
+ 
+@@ -762,7 +809,7 @@ public class SpriteText
+ 			fontPixelZoom = 1.75f;
+ 			break;
+ 		case LocalizedContentManager.LanguageCode.zh:
+-			if (Game1.options.useChineseSmoothFont)
++			if (Game1.options.useChineseSmoothFont && !VitaPlatform.IsVita)
+ 			{
+ 				pathBase += "Chinese_round\\";
+ 				fontPixelZoom = 1f;
+@@ -809,6 +856,32 @@ public class SpriteText
+ 		}
+ 	}
+ 
++	private static bool IsJapaneseSmallKanaOrProlong(char c)
++	{
++		switch (c)
++		{
++			case '々': case 'ぁ': case 'ぃ': case 'ぅ': case 'ぇ': case 'ぉ':
++			case 'っ': case 'ゃ': case 'ゅ': case 'ょ': case 'ゎ': case 'ゕ':
++			case 'ゖ': case 'ァ': case 'ィ': case 'ゥ': case 'ェ': case 'ォ':
++			case 'ッ': case 'ャ': case 'ュ': case 'ョ': case 'ヶ': case 'ー':
++				return true;
++			default:
++				return false;
++		}
++	}
++
++	private static bool IsClosingPunctuation(char c)
++	{
++		switch (c)
++		{
++			case '）': case '》': case '”': case '’': case '」': case '』':
++			case ')': case '，': case '。': case '、': case '？': case '！': case '：':
++				return true;
++			default:
++				return false;
++		}
++	}
++
+ 	public static int positionOfNextSpace(string s, int index, int currentXPosition, int accumulatedHorizontalSpaceBetweenCharacters)
+ 	{
+ 		setUpCharacterMap();
+@@ -816,10 +889,43 @@ public class SpriteText
+ 		if (currentLanguageCode == LocalizedContentManager.LanguageCode.ja || currentLanguageCode == LocalizedContentManager.LanguageCode.zh || currentLanguageCode == LocalizedContentManager.LanguageCode.th)
+ 		{
+ 			float result = currentXPosition;
+-			string value = Game1.asianSpacingRegex.Match(s, index).Value;
+-			foreach (char c in value)
++			int p = index;
++			if (p < s.Length)
++			{
++				if (char.IsWhiteSpace(s[p]))
++				{
++				p++;
++				}
++				else
++				{
++					if (s[p] == '（' || s[p] == '《' || s[p] == '“' || s[p] == '‘' || s[p] == '「' || s[p] == '『' || s[p] == '(')
++					{
++						p++;
++					}
++					if (p < s.Length && (char.IsLetterOrDigit(s[p]) || s[p] == ',' || s[p] == '%' || s[p] == '％' || s[p] == '_'))
++					{
++						while (p < s.Length && (char.IsLetterOrDigit(s[p]) || s[p] == ',' || s[p] == '%' || s[p] == '％' || s[p] == '_'))
++						{
++							p++;
++						}
++					}
++					else if (p < s.Length && s[p] != '…' && s[p] != '—')
++					{
++						p++;
++					}
++					while (p < s.Length && IsJapaneseSmallKanaOrProlong(s[p]))
++					{
++						p++;
++					}
++					while (p < s.Length && IsClosingPunctuation(s[p]))
++					{
++						p++;
++					}
++				}
++			}
++			for (int k = index; k < p; k++)
+ 			{
+-				if (characterMap.TryGetValue(c, out var fc))
++				if (characterMap.TryGetValue(s[k], out var fc))
+ 				{
+ 					result += (float)fc.XAdvance * FontPixelZoom;
+ 				}

@@ -1,0 +1,31 @@
+diff --git a/src/Graphics/SamplerStateCollection.cs b/src/Graphics/SamplerStateCollection.cs
+index c8c73af9cbb17e24d2e6571cdd1070bf9e34b855..c2440f8ac4ffab6e27dcb48d5cb921993f3fbb70 100644
+--- a/src/Graphics/SamplerStateCollection.cs
++++ b/src/Graphics/SamplerStateCollection.cs
+@@ -39,7 +39,7 @@ namespace Microsoft.Xna.Framework.Graphics
+ 				}
+ 				value.graphicsDevice = pDevice;
+ 				samplers[index] = value;
+-				modifiedSamplers[index] = true;
++				modifiedSamplers[0] |= 1 << index; // Vita port: mark only this slot dirty
+ 			}
+ 		}
+ 
+@@ -49,7 +49,7 @@ namespace Microsoft.Xna.Framework.Graphics
+ 
+ 		private readonly GraphicsDevice pDevice;
+ 		private readonly SamplerState[] samplers;
+-		private readonly bool[] modifiedSamplers;
++		private readonly int[] modifiedSamplers;
+ 
+ 		#endregion
+ 
+@@ -58,7 +58,7 @@ namespace Microsoft.Xna.Framework.Graphics
+ 		internal SamplerStateCollection(
+ 			GraphicsDevice pParent,
+ 			int slots,
+-			bool[] modSamplers
++			int[] modSamplers
+ 		) {
+ 			pDevice = pParent;
+ 			samplers = new SamplerState[slots];

@@ -1,0 +1,206 @@
+diff --git a/xTile.Tiles/TileIndexPropertyCollection.cs b/xTile.Tiles/TileIndexPropertyCollection.cs
+index a1b02cce3c599de98fa5f9ba942045554720d6b4..174654e0fb7b1644846b5a665ada009a419c40b0 100644
+--- a/xTile.Tiles/TileIndexPropertyCollection.cs
++++ b/xTile.Tiles/TileIndexPropertyCollection.cs
+@@ -8,7 +8,15 @@ namespace xTile.Tiles;
+ 
+ internal class TileIndexPropertyCollection : IPropertyCollection, IDictionary<string, PropertyValue>, ICollection<KeyValuePair<string, PropertyValue>>, IEnumerable<KeyValuePair<string, PropertyValue>>, IEnumerable
+ {
+-	private readonly Dictionary<string, string> m_indexKeys;
++	// Port: created on first use (one per tile index ever looked at; most have no properties to cache keys for).
++	private Dictionary<string, string> m_indexKeys;
++
++	// These keys dominate collision probes. Cache their indexed strings without another dictionary lookup.
++	private string m_keyPassable;
++	private string m_keyShadow;
++	private string m_keyNPCPassable;
++	private string m_keyProjectilePassable;
++	private string m_keyWater;
+ 
+ 	private readonly TileSheet m_tileSheet;
+ 
+@@ -18,12 +26,25 @@ internal class TileIndexPropertyCollection : IPropertyCollection, IDictionary<st
+ 
+ 	private readonly string m_tileIndexKey;
+ 
+-	private static readonly char[] At = new char[1] { '@' };
++	private const string IndexedKeyPrefix = "@TileIndex@";
+ 
+-	public ICollection<string> Keys => new List<string>(from x in m_tileSheet.Properties.Keys
+-		select ParseIndexedKey(x) into x
+-		where x != null
+-		select x);
++	public ICollection<string> Keys
++	{
++		get
++		{
++			// Port: a loop instead of a LINQ chain (same keys, same order).
++			List<string> keys = new List<string>();
++			foreach (string indexedKey in m_tileSheet.Properties.Keys)
++			{
++				string key = ParseIndexedKey(indexedKey);
++				if (key != null)
++				{
++					keys.Add(key);
++				}
++			}
++			return keys;
++		}
++	}
+ 
+ 	public ICollection<PropertyValue> Values
+ 	{
+@@ -65,11 +86,35 @@ internal class TileIndexPropertyCollection : IPropertyCollection, IDictionary<st
+ 		m_tileIndex = tileIndex;
+ 		m_tileIndexString = m_tileIndex.ToString();
+ 		m_tileIndexKey = "@TileIndex@" + m_tileIndexString + "@";
+-		m_indexKeys = new Dictionary<string, string>(12);
+ 	}
+ 
+ 	private string IndexKey(string key)
+ 	{
++		if (key == "Passable")
++		{
++			return m_keyPassable ??= m_tileIndexKey + key;
++		}
++		if (key == "Shadow")
++		{
++			return m_keyShadow ??= m_tileIndexKey + key;
++		}
++		if (key == "NPCPassable")
++		{
++			return m_keyNPCPassable ??= m_tileIndexKey + key;
++		}
++		if (key == "ProjectilePassable")
++		{
++			return m_keyProjectilePassable ??= m_tileIndexKey + key;
++		}
++		if (key == "Water")
++		{
++			return m_keyWater ??= m_tileIndexKey + key;
++		}
++
++		if (m_indexKeys == null)
++		{
++			m_indexKeys = new Dictionary<string, string>(4);
++		}
+ 		if (!m_indexKeys.TryGetValue(key, out var value))
+ 		{
+ 			value = m_tileIndexKey + key;
+@@ -78,26 +123,82 @@ internal class TileIndexPropertyCollection : IPropertyCollection, IDictionary<st
+ 		return value;
+ 	}
+ 
++	/// <summary>The key of a sheet property "@TileIndex@&lt;this index&gt;@&lt;key&gt;", or null for any other property.</summary>
++	/// <remarks>Port: the vanilla method split every sheet property name on '@' and kept it when that gave exactly {"", "TileIndex", index, key}: the same as starting with "@TileIndex@&lt;index&gt;@" and having no '@' after it. Each Keys/Clear/Count runs this on every property of the sheet; the four strings and the array per property were most of a map override's cost on the Vita.</remarks>
+ 	private string ParseIndexedKey(string indexedKey)
+ 	{
+-		string[] array = indexedKey.Split(At);
+-		if (array.Length != 4)
++		string prefix = m_tileIndexKey;
++		if (!indexedKey.StartsWith(prefix, StringComparison.Ordinal) || indexedKey.IndexOf('@', prefix.Length) >= 0)
+ 		{
+ 			return null;
+ 		}
+-		if (array[0].Length != 0)
++		return indexedKey.Substring(prefix.Length);
++	}
++
++	/// <summary>Port: the tile index of a sheet property that <see cref="ParseIndexedKey" /> reads as a key of that index: "@TileIndex@&lt;index&gt;@&lt;key&gt;", the index written as int.ToString writes a non-negative number and no '@' in the key.</summary>
++	internal static bool TryGetTileIndex(string indexedKey, out int tileIndex)
++	{
++		tileIndex = -1;
++		if (!indexedKey.StartsWith(IndexedKeyPrefix, StringComparison.Ordinal))
+ 		{
+-			return null;
++			return false;
+ 		}
+-		if (!array[1].Equals("TileIndex", StringComparison.Ordinal))
++		int start = IndexedKeyPrefix.Length;
++		int at = indexedKey.IndexOf('@', start);
++		int digits = at - start;
++		if (digits <= 0 || digits > 9 || (digits > 1 && indexedKey[start] == '0') || indexedKey.IndexOf('@', at + 1) >= 0)
+ 		{
+-			return null;
++			return false;
+ 		}
+-		if (!array[2].Equals(m_tileIndexString, StringComparison.Ordinal))
++		int value = 0;
++		for (int i = start; i < at; i++)
+ 		{
+-			return null;
++			char c = indexedKey[i];
++			if (c < '0' || c > '9')
++			{
++				return false;
++			}
++			value = value * 10 + (c - '0');
++		}
++		tileIndex = value;
++		return true;
++	}
++
++	/// <summary>Port: what <see cref="CopyFrom" /> from <paramref name="source" />'s collection of the same index does for every index in [<paramref name="first" />, <paramref name="end" />), in one pass over each sheet's properties instead of two per index.</summary>
++	/// <remarks>A copied property keeps its name: "@TileIndex@i@key" is the same in both sheets. The values are shared, as CopyFrom shares them.</remarks>
++	internal static void CopyRange(TileSheet target, TileSheet source, int first, int end)
++	{
++		IPropertyCollection targetProperties = target.Properties;
++		List<string> stale = null;
++		foreach (string indexedKey in targetProperties.Keys)
++		{
++			if (TryGetTileIndex(indexedKey, out int index) && index >= first && index < end)
++			{
++				(stale ??= new List<string>()).Add(indexedKey);
++			}
++		}
++		if (stale != null)
++		{
++			foreach (string indexedKey in stale)
++			{
++				targetProperties.Remove(indexedKey);
++			}
++		}
++		List<KeyValuePair<string, PropertyValue>> copied = null;
++		foreach (KeyValuePair<string, PropertyValue> property in source.Properties)
++		{
++			if (TryGetTileIndex(property.Key, out int index) && index >= first && index < end)
++			{
++				(copied ??= new List<KeyValuePair<string, PropertyValue>>()).Add(property);
++			}
++		}
++		if (copied != null)
++		{
++			foreach (KeyValuePair<string, PropertyValue> property in copied)
++			{
++				targetProperties[property.Key] = property.Value;
++			}
+ 		}
+-		return array[3];
+ 	}
+ 
+ 	public void CopyFrom(IPropertyCollection propertyCollection)
+@@ -142,10 +243,21 @@ internal class TileIndexPropertyCollection : IPropertyCollection, IDictionary<st
+ 	public void Clear()
+ 	{
+ 		IPropertyCollection properties = m_tileSheet.Properties;
+-		IEnumerable<string> enumerable = properties.Keys.Where((string x) => ParseIndexedKey(x) != null).ToArray();
+-		foreach (string item in enumerable)
++		// Port: a loop instead of Where(...).ToArray(), and no list when nothing matches.
++		List<string> matching = null;
++		foreach (string indexedKey in properties.Keys)
+ 		{
+-			properties.Remove(item);
++			if (ParseIndexedKey(indexedKey) != null)
++			{
++				(matching ??= new List<string>()).Add(indexedKey);
++			}
++		}
++		if (matching != null)
++		{
++			foreach (string item in matching)
++			{
++				properties.Remove(item);
++			}
+ 		}
+ 	}
+ 

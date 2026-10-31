@@ -1,0 +1,62 @@
+diff --git a/StardewValley.TerrainFeatures/Grass.cs b/StardewValley.TerrainFeatures/Grass.cs
+index bce45a38a6397ca21e30023c71faf42b0620f8a6..6d46bc0dca8ec7d9bea77b1892b96eaebb3f5354 100644
+--- a/StardewValley.TerrainFeatures/Grass.cs
++++ b/StardewValley.TerrainFeatures/Grass.cs
+@@ -255,6 +255,11 @@ public class Grass : TerrainFeature
+ 
+ 	protected void shake(float shake, float rate, bool left)
+ 	{
++		if (!VitaPlatform.ShakeEnabled)
++		{
++			// Port: Vita option, no wobble animation.
++			return;
++		}
+ 		maxShake = shake;
+ 		shakeRate = rate;
+ 		shakeRotation = 0f;
+@@ -395,6 +400,11 @@ public class Grass : TerrainFeature
+ 
+ 	private void createDestroySprites(GameLocation location, Vector2 tileLocation)
+ 	{
++		if (VitaPlatform.MinimalDebris || VitaPlatform.FewParticles)
++		{
++			// Port: Vita option, cosmetic only.
++			return;
++		}
+ 		Color c;
+ 		switch (grassType.Value)
+ 		{
+@@ -521,10 +531,30 @@ public class Grass : TerrainFeature
+ 	public override void draw(SpriteBatch spriteBatch)
+ 	{
+ 		Vector2 tileLocation = Tile;
+-		for (int i = 0; i < numberOfWeeds.Value; i++)
++		// Port: the callers walk tiles well past the screen (GameLocation.drawAboveFrontLayer goes 6 rows below it and 2
++		// columns right, for the trees' tops); a tuft reaches at most about a tile and a half from its own tile, shaking
++		// included, so one off by more than two tiles draws nothing. On a grassy farm at the far camera that was a quarter
++		// of the blades drawn, and the grass 12-16% of the frame.
++		if (VitaPlatform.IsVita)
++		{
++			xTile.Dimensions.Rectangle view = Game1.viewport;
++			float left = tileLocation.X * 64f;
++			float top = tileLocation.Y * 64f;
++			if (left + 192f < view.X || left - 128f > view.X + view.Width || top + 192f < view.Y || top - 128f > view.Y + view.Height)
++			{
++				return;
++			}
++		}
++		// Port: the texture once per tuft, not once per blade (Lazy.Value showed at 3% of the frame).
++		Texture2D grassTexture = texture.Value;
++		Vector2 tilePixels = tileLocation * 64f;
++		int weedCount = numberOfWeeds.Value;
++		int sourceOffset = grassSourceOffset.Value;
++		xTile.Dimensions.Rectangle viewport = Game1.viewport;
++		for (int i = 0; i < weedCount; i++)
+ 		{
+-			Vector2 pos = ((i != 4) ? (tileLocation * 64f + new Vector2((float)(i % 2 * 64 / 2 + offset3[i] * 4 - 4) + 30f, i / 2 * 64 / 2 + offset4[i] * 4 + 40)) : (tileLocation * 64f + new Vector2((float)(16 + offset1[i] * 4 - 4) + 30f, 16 + offset2[i] * 4 + 40)));
+-			spriteBatch.Draw(texture.Value, Game1.GlobalToLocal(Game1.viewport, pos), new Rectangle(whichWeed[i] * 15, grassSourceOffset.Value, 15, 20), Color.White, shakeRotation / (float)(shakeRandom[i] + 1.0), new Vector2(7.5f, 17.5f), 4f, flip[i] ? SpriteEffects.FlipHorizontally : SpriteEffects.None, (pos.Y + 16f - 20f) / 10000f + pos.X / 10000000f);
++			Vector2 pos = ((i != 4) ? (tilePixels + new Vector2((float)(i % 2 * 64 / 2 + offset3[i] * 4 - 4) + 30f, i / 2 * 64 / 2 + offset4[i] * 4 + 40)) : (tilePixels + new Vector2((float)(16 + offset1[i] * 4 - 4) + 30f, 16 + offset2[i] * 4 + 40)));
++			spriteBatch.Draw(grassTexture, Game1.GlobalToLocal(viewport, pos), new Rectangle(whichWeed[i] * 15, sourceOffset, 15, 20), Color.White, shakeRotation / (float)(shakeRandom[i] + 1.0), new Vector2(7.5f, 17.5f), 4f, flip[i] ? SpriteEffects.FlipHorizontally : SpriteEffects.None, (pos.Y + 16f - 20f) / 10000f + pos.X / 10000000f);
+ 		}
+ 	}
+ }

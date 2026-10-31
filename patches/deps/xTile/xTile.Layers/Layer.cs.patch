@@ -1,0 +1,53 @@
+diff --git a/xTile.Layers/Layer.cs b/xTile.Layers/Layer.cs
+index 23a51ca190892fd20119053ec2dcc4b479f567f8..389e8437a0ba2b7d2d652df5ca84118812a14b5c 100644
+--- a/xTile.Layers/Layer.cs
++++ b/xTile.Layers/Layer.cs
+@@ -161,8 +161,15 @@ public class Layer : DescribedComponent
+ 	public void MarkRowDirty(int y)
+ 	{
+ 		_dirtyRows.Add(y);
++		VitaTileEdits++;
+ 	}
+ 
++	/// <summary>Port: counts tile changes in every layer (tiles placed or removed, a tile's index or blend mode changed, tile sheet textures reloaded), so a cached picture of tiles knows when it is stale.</summary>
++	public static int VitaTileEdits;
++
++	/// <summary>Port: whether drawing this layer runs BeforeDraw / AfterDraw handlers (a cached picture of it would skip them).</summary>
++	public bool VitaHasDrawHandlers => BeforeDraw != null || AfterDraw != null;
++
+ 	public bool DependsOnTileSheet(TileSheet tileSheet)
+ 	{
+ 		for (int i = 0; i < m_layerSize.Height; i++)
+@@ -249,6 +256,7 @@ public class Layer : DescribedComponent
+ 				if (tile != null && tile.DependsOnTileSheet(tileSheet))
+ 				{
+ 					m_tiles[j, i] = null;
++					VitaTileEdits++;
+ 				}
+ 			}
+ 		}
+@@ -348,6 +356,12 @@ public class Layer : DescribedComponent
+ 		for (int j = num4; j < num8; j++)
+ 		{
+ 			location2.X = displayOffset.X - location.X;
++			// Port: the depth only depends on the row; it was computed (with a float division) for every tile.
++			float layerDepth = 0f;
++			if (sort_offset >= 0f)
++			{
++				layerDepth = ((float)(j * (16 * pixelZoom) + 16 * pixelZoom) + sort_offset) / 10000f;
++			}
+ 			int num9;
+ 			for (int k = num3; k < num7; k += num9)
+ 			{
+@@ -356,11 +370,6 @@ public class Layer : DescribedComponent
+ 				Tile tile = m_tiles[k, j];
+ 				if (tile != null)
+ 				{
+-					float layerDepth = 0f;
+-					if (sort_offset >= 0f)
+-					{
+-						layerDepth = ((float)(j * (16 * pixelZoom) + 16 * pixelZoom) + sort_offset) / 10000f;
+-					}
+ 					displayDevice.DrawTile(tile, location2, layerDepth);
+ 				}
+ 				location2.X += num * num9;

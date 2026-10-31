@@ -1,0 +1,75 @@
+diff --git a/StardewValley.SaveMigrations/SaveMigrator_1_6.cs b/StardewValley.SaveMigrations/SaveMigrator_1_6.cs
+index 7b57b3899ebc40873f3b44b164d3c8ca14f18262..27fdb77114d459e843a52ba0e3ccb51a4ff48df6 100644
+--- a/StardewValley.SaveMigrations/SaveMigrator_1_6.cs
++++ b/StardewValley.SaveMigrations/SaveMigrator_1_6.cs
+@@ -1301,6 +1301,70 @@ public class SaveMigrator_1_6 : ISaveMigrator
+ 			ObjectDataDefinition objTypeDefinition = ItemRegistry.GetObjectTypeDefinition();
+ 			Utility.ForEachItemContext(HandleItem);
+ 			return true;
++			bool HandleItem(StardewValley.Internal.ForEachItemContext context)
++			{
++				if (!(context.Item is Object obj))
++				{
++					return true;
++				}
++				string value = obj.preservedParentSheetIndex.Value;
++				if (value == null || value == "0")
++				{
++					obj.preservedParentSheetIndex.Value = null;
++					return true;
++				}
++				if (!obj.isRecipe.Value && !(obj is ColoredObject))
++				{
++					Object obj2 = null;
++					switch (context.Item.QualifiedItemId)
++					{
++					case "(O)344":
++					{
++						Object ingredient4 = ItemRegistry.Create<Object>("(O)" + value);
++						obj2 = objTypeDefinition.CreateFlavoredJelly(ingredient4);
++						break;
++					}
++					case "(O)350":
++					{
++						Object ingredient3 = ItemRegistry.Create<Object>("(O)" + value);
++						obj2 = objTypeDefinition.CreateFlavoredJuice(ingredient3);
++						break;
++					}
++					case "(O)342":
++					{
++						Object ingredient2 = ItemRegistry.Create<Object>("(O)" + value);
++						obj2 = objTypeDefinition.CreateFlavoredPickle(ingredient2);
++						break;
++					}
++					case "(O)348":
++					{
++						Object ingredient = ItemRegistry.Create<Object>("(O)" + value);
++						obj2 = objTypeDefinition.CreateFlavoredWine(ingredient);
++						break;
++					}
++					}
++					if (obj2 != null)
++					{
++						obj2.Name = obj.Name;
++						obj2.Price = obj.Price;
++						obj2.Stack = obj.Stack;
++						obj2.Quality = obj.Quality;
++						obj2.CanBeGrabbed = obj.CanBeGrabbed;
++						obj2.CanBeSetDown = obj.CanBeSetDown;
++						obj2.Edibility = obj.Edibility;
++						obj2.Fragility = obj.Fragility;
++						obj2.HasBeenInInventory = obj.HasBeenInInventory;
++						obj2.questId.Value = obj.questId.Value;
++						obj2.questItem.Value = obj.questItem.Value;
++						foreach (KeyValuePair<string, string> pair in obj.modData.Pairs)
++						{
++							obj2.modData[pair.Key] = pair.Value;
++						}
++						context.ReplaceItemWith(obj2);
++					}
++				}
++				return true;
++			}
+ 		}
+ 		case SaveFixes.MigrateQuestDataTo16:
+ 		{

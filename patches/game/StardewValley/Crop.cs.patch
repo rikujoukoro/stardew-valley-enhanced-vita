@@ -1,0 +1,54 @@
+diff --git a/StardewValley/Crop.cs b/StardewValley/Crop.cs
+index c0709528afc6203b02101af160898e15b14b26b5..65fd09a47bbee83ecac4221809b8823358d66866 100644
+--- a/StardewValley/Crop.cs
++++ b/StardewValley/Crop.cs
+@@ -644,12 +644,17 @@ public class Crop : INetObject<NetFields>, IHaveModData
+ 			}
+ 			if (success)
+ 			{
++				bool isSunflowerSeedDrop = false;
+ 				if (indexOfHarvest.Value == "421")
+ 				{
+ 					indexOfHarvest.Value = "431";
+ 					numToHarvest = r2.Next(1, 4);
++					isSunflowerSeedDrop = true;
++				}
++				if (isSunflowerSeedDrop || numToHarvest > 1)
++				{
++					harvestedItem = (programColored.Value ? new ColoredObject(indexOfHarvest.Value, 1, tintColor.Value) : ItemRegistry.Create(indexOfHarvest.Value));
+ 				}
+-				harvestedItem = (programColored.Value ? new ColoredObject(indexOfHarvest.Value, 1, tintColor.Value) : ItemRegistry.Create(indexOfHarvest.Value));
+ 				int price = 0;
+ 				if (harvestedItem is Object obj)
+ 				{
+@@ -660,15 +665,23 @@ public class Crop : INetObject<NetFields>, IHaveModData
+ 				{
+ 					Game1.player.gainExperience(0, (int)Math.Round(experience2));
+ 				}
+-				for (int i = 0; i < numToHarvest - 1; i++)
++				if (numToHarvest > 1 && junimoHarvester == null && VitaPlatform.MinimalDebris)
+ 				{
+-					if (junimoHarvester == null)
+-					{
+-						Game1.createItemDebris(harvestedItem.getOne(), new Vector2(xTile * 64 + 32, yTile * 64 + 32), -1);
+-					}
+-					else
++					harvestedItem.Stack = numToHarvest - 1;
++					Game1.createItemDebris(harvestedItem, new Vector2(xTile * 64 + 32, yTile * 64 + 32), -1);
++				}
++				else
++				{
++					for (int i = 0; i < numToHarvest - 1; i++)
+ 					{
+-						junimoHarvester.tryToAddItemToHut(harvestedItem.getOne());
++						if (junimoHarvester == null)
++						{
++							Game1.createItemDebris(harvestedItem.getOne(), new Vector2(xTile * 64 + 32, yTile * 64 + 32), -1);
++						}
++						else
++						{
++							junimoHarvester.tryToAddItemToHut(harvestedItem.getOne());
++						}
+ 					}
+ 				}
+ 				string value = indexOfHarvest.Value;

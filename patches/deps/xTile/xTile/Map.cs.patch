@@ -1,0 +1,73 @@
+diff --git a/xTile/Map.cs b/xTile/Map.cs
+index 9ce02495415b9b9baa336efd9d71ce809233cafd..a7c0e20cc10251fc5fb9e8ba0fa38882f68f478d 100644
+--- a/xTile/Map.cs
++++ b/xTile/Map.cs
+@@ -20,6 +20,12 @@ public class Map : DescribedComponent
+ 
+ 	private readonly Dictionary<string, Layer> m_layersById;
+ 
++	// Common collision/shadow layers: avoid hashing their names on every tile probe.
++	private Layer m_cachedBackLayer;
++	private Layer m_cachedBuildingsLayer;
++	private int m_commonLayerCache; // bit 0: Back known, bit 1: Buildings known (including missing).
++
++
+ 	private readonly ReadOnlyCollection<Layer> m_readOnlyLayers;
+ 
+ 	private long m_elapsedTime;
+@@ -86,15 +92,33 @@ public class Map : DescribedComponent
+ 	{
+ 		foreach (TileSheet tileSheet in m_tileSheets)
+ 		{
+-			string imageSource = tileSheet.ImageSource;
+-			imageSource.Replace('\\', Path.DirectorySeparatorChar);
++			string ımageSource = tileSheet.ImageSource;
++			ımageSource.Replace('\\', Path.DirectorySeparatorChar);
+ 			tileSheet.ImageSource = GetFullAssetPath(tileSheet.ImageSource);
+ 		}
+ 	}
+ 
+ 	public Layer GetLayer(string layerId)
+ 	{
++		if (layerId == "Back" && (m_commonLayerCache & 1) != 0)
++		{
++			return m_cachedBackLayer;
++		}
++		if (layerId == "Buildings" && (m_commonLayerCache & 2) != 0)
++		{
++			return m_cachedBuildingsLayer;
++		}
+ 		m_layersById.TryGetValue(layerId, out var value);
++		if (layerId == "Back")
++		{
++			m_cachedBackLayer = value;
++			m_commonLayerCache |= 1;
++		}
++		else if (layerId == "Buildings")
++		{
++			m_cachedBuildingsLayer = value;
++			m_commonLayerCache |= 2;
++		}
+ 		return value;
+ 	}
+ 
+@@ -119,6 +143,9 @@ public class Map : DescribedComponent
+ 		}
+ 		m_layers.Insert(layerIndex, layer);
+ 		m_layersById.Add(layer.Id, layer);
++		m_commonLayerCache = 0;
++		m_cachedBackLayer = null;
++		m_cachedBuildingsLayer = null;
+ 		UpdateDisplaySize();
+ 	}
+ 
+@@ -130,6 +157,9 @@ public class Map : DescribedComponent
+ 		}
+ 		m_layers.Remove(layer);
+ 		m_layersById.Remove(layer.Id);
++		m_commonLayerCache = 0;
++		m_cachedBackLayer = null;
++		m_cachedBuildingsLayer = null;
+ 		UpdateDisplaySize();
+ 	}
+ 

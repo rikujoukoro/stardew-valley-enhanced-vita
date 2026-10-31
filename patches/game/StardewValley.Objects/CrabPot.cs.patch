@@ -1,0 +1,22 @@
+diff --git a/StardewValley.Objects/CrabPot.cs b/StardewValley.Objects/CrabPot.cs
+index 98d4f78523aab98396530e0831274d419e54b32a..c546ce32daa026613b28fc41e9b1a2bc37a041c0 100644
+--- a/StardewValley.Objects/CrabPot.cs
++++ b/StardewValley.Objects/CrabPot.cs
+@@ -443,7 +443,7 @@ public class CrabPot : Object
+ 	{
+ 		if (lidFlapping)
+ 		{
+-			lidFlapTimer -= time.ElapsedGameTime.Milliseconds;
++			lidFlapTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 			if (lidFlapTimer <= 0f)
+ 			{
+ 				tileIndexToShow += ((!lidClosing) ? 1 : (-1));
+@@ -467,7 +467,7 @@ public class CrabPot : Object
+ 		}
+ 		if (readyForHarvest.Value && heldObject.Value != null)
+ 		{
+-			shakeTimer -= time.ElapsedGameTime.Milliseconds;
++			shakeTimer -= Utility.ElapsedMs(time.ElapsedGameTime);
+ 			if (shakeTimer < 0f)
+ 			{
+ 				shakeTimer = Game1.random.Next(2800, 3200);
