@@ -1,5 +1,5 @@
 {
-  "comment": "Inputs the patches were made against: Stardew Valley 1.6.15, 'compatibility' beta branch. Any other hash is refused.",
+  "comment": "Inputs the patches were made against: Stardew Valley 1.6.15, 'compatibility' beta branch (Steam) or the GOG build of it. Any other hash is refused.",
   "ilspycmd": {
     "version": "11.1.0.9782",
     "nupkg_sha256": "74c07facaf1850c78a779fc509031f756e1c0de24b1a536f3363d7ef81ce001f"
@@ -13,6 +13,19 @@
         "BmFont.dll": "f2de1f778398d7e7366f182e1cd36b6dd236ae3be815df24923775b76621a001",
         "StardewValley.GameData.dll": "68a852ca7c0c71d677c8a0865c2d71827386ad22a899266fff2a630981fb86a8",
         "Lidgren.Network.dll": "f5ff9d3be5d1d91e99474239a3756ae76675491cfe5e7553e2722658aa4fb3b4"
+      }
+    },
+    {
+      "name": "GOG 1.6.15 compatibility (build 58211148168413492)",
+      "comment": "The Steam build without its Steam code (same Content and libraries): patches/gog turns the decompiled exe into the Steam one's source before the port's patches.",
+      "prepatches": "gog",
+      "serializers": "xmlserializers-gog.bin",
+      "files": {
+        "Stardew Valley.exe": "e6b49264f1bb2a7fd6a40769cfab07f7da2c8ad63466cc307df5d30d3d39007a",
+        "xTile.dll": "de5796ef52b93d9e73b755ce198c5a72d980ec8796ce1a82f1ffb962e22b7f33",
+        "BmFont.dll": "6f2e993b038346bf2c2d86d3ed603a9b03332587de5d8c00a8eee03c28abbc90",
+        "StardewValley.GameData.dll": "580ae088ed54343bc3e24b910fe6b0294afec8ced0eb9c52df1eca2086ec8406",
+        "Lidgren.Network.dll": "891247799dd2d904dcb1949428f614b036edf669178625f0a9e83eecebe3a326"
       }
     }
   ]

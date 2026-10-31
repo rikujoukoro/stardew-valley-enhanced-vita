@@ -2,3 +2,5 @@ work/
 builder/bin/
 builder/obj/
 __pycache__/
+# A game folder put here for the builder to find (never committed).
+/Stardew Valley/

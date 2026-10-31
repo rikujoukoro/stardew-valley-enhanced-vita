@@ -1,0 +1,23 @@
+diff --git a/StardewValley/Game1.cs b/StardewValley/Game1.cs
+index 5c7a6d6841e4a3830483518d04338626651a0550..fe45ae0172829881856459caf44fe8cb28216da4 100644
+--- a/StardewValley/Game1.cs
++++ b/StardewValley/Game1.cs
+@@ -59,6 +59,7 @@ using StardewValley.Objects;
+ using StardewValley.Pathfinding;
+ using StardewValley.Projectiles;
+ using StardewValley.Quests;
++using StardewValley.SDKs.Steam;
+ using StardewValley.SaveMigrations;
+ using StardewValley.SaveSerialization;
+ using StardewValley.SpecialOrders;
+@@ -3410,6 +3411,10 @@ public class Game1 : InstanceGame
+ 		if ((mouseState.LeftButton == Microsoft.Xna.Framework.Input.ButtonState.Pressed || mouseState.MiddleButton == Microsoft.Xna.Framework.Input.ButtonState.Pressed || mouseState.RightButton == Microsoft.Xna.Framework.Input.ButtonState.Pressed || mouseState.ScrollWheelValue != _oldScrollWheelValue || ((mouseState.X != _oldMousePosition.X || mouseState.Y != _oldMousePosition.Y) && lastCursorMotionWasMouse) || keyState.GetPressedKeys().Length != 0) && (keyState.GetPressedKeys().Length != 1 || keyState.GetPressedKeys()[0] != Microsoft.Xna.Framework.Input.Keys.Pause))
+ 		{
+ 			non_gamepad_control_was_used = true;
++			if (Program.sdk is SteamHelper steamHelper && steamHelper.IsRunningOnSteamDeck())
++			{
++				non_gamepad_control_was_used = false;
++			}
+ 		}
+ 		_oldScrollWheelValue = mouseState.ScrollWheelValue;
+ 		_oldMousePosition.X = mouseState.X;

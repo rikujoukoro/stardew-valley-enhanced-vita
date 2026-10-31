@@ -2,10 +2,11 @@
 
 An unofficial PS Vita port of Stardew Valley 1.6, built on your own PC from your own copy of the game.
 
-> **GOG is not supported yet.** I don't own Stardew Valley on GOG, so I can't make or test a GOG version. If you have
-> the game on GOG and want to help add it, please get in touch (open an issue on this repository).
+> **Steam and GOG.** The GOG version works too (its 1.6.15 compatibility build). The builder turns it into the
+> same Vita build as Steam's, byte for byte, so it hasn't been tested on a Vita separately. Thanks to the player
+> who shared their GOG files for testing.
 
-**This repository does not contain Stardew Valley.** The builder takes your own legal copy (Steam) and turns it into
+**This repository does not contain Stardew Valley.** The builder takes your own legal copy (Steam or GOG) and turns it into
 a PS Vita build on your PC: it decompiles your copy, applies the port's changes and builds it. No game code, art or
 audio is distributed here. Not affiliated with ConcernedApe, Sickhead Games or Sony. Please buy the game.
 
@@ -21,9 +22,10 @@ audio is distributed here. Not affiliated with ConcernedApe, Sickhead Games or S
 ## What you need
 
 **On the Vita:** HENkaku/Ensō, VitaShell, `kubridge.skprx` (v0.3.1_hotfix) under `*KERNEL` in
-`ur0:tai/config.txt`, and `libshacccg.suprx` in `ur0:data/`. Optional: NoTrpDrm for real trophies.
+`ur0:tai/config.txt`, and `libshacccg.suprx` in `ur0:data/` (or `ur0:data/external/`). Optional: NoTrpDrm for real
+trophies.
 
-**On the PC:** Stardew Valley on Steam, about 5 GB of free space, an internet connection for the first build, and:
+**On the PC:** Stardew Valley on Steam or GOG, about 5 GB of free space, an internet connection for the first build, and:
 
 | System | What to install | Download from Releases |
 | --- | --- | --- |
@@ -39,14 +41,19 @@ Nothing else: the builder downloads the official VitaSDK by itself the first tim
 
 1. **Install the .NET 8 SDK** from https://dotnet.microsoft.com/download/dotnet/8.0 (Windows, x64 installer of the
    SDK). A newer SDK works too.
-2. **Switch Stardew Valley to the compatibility branch:** Steam → Library → right-click Stardew Valley →
-   Properties → Betas → choose **compatibility**, and let it update. The builder checks the game files and stops on
-   any other version.
+2. **Switch Stardew Valley to the compatibility version:**
+   - Steam: Library → right-click Stardew Valley → Properties → Betas → choose **compatibility**, and let it update.
+   - GOG: install the game's **compatibility** version (1.6.15) in GOG Galaxy.
+
+   The builder checks the game files and stops on any other version.
 3. **Download `StardewVitaBuilder-windows.zip`** from this repository's Releases and unzip it somewhere short and
    plain, like `C:\Games`. Not on a OneDrive Desktop or Documents folder.
 4. **Double-click `Build.bat`** in the `StardewVitaBuilder` folder. If Windows shows "Windows protected your PC",
-   choose *More info* → *Run anyway*. It finds your Steam game by itself and takes about 4 minutes the first time
-   (2-3 minutes after that). If something goes wrong, the window stays open with an `ERROR:` line saying what.
+   choose *More info* → *Run anyway*. It finds your Steam or GOG Galaxy game by itself and takes about 4 minutes the
+   first time (2-3 minutes after that). If something goes wrong, the window stays open with an `ERROR:` line saying
+   what. If it doesn't find the game (for example, a GOG game installed without Galaxy), copy your game folder (the
+   one with `Stardew Valley.exe`) into the `StardewVitaBuilder` folder, name it `Stardew Valley`, and run
+   `Build.bat` again.
 5. When it's done, the folder to copy opens by itself (`work\out\ux0`). It is laid out like the Vita's memory card:
    `data\StardewValley` (~600 MB, with your PC saves in `Saves`) and `stardew.vpk`.
 6. **Copy it to the Vita:** in VitaShell press SELECT for USB (or use FTP) and copy everything inside `ux0` to the
@@ -66,7 +73,7 @@ Tested only in a Linux test setup (Debian 11), never on a real Linux PC: please 
    an x86_64 Linux with glibc 2.29 or newer (Ubuntu 20.04+, Debian 11+, Fedora, Arch, SteamOS...).
 2. In Steam: Stardew Valley → Properties → Betas → **compatibility**, and also Properties → Compatibility → *Force
    the use of a specific Steam Play compatibility tool* (any Proton), so Steam downloads the game's **Windows** files,
-   which the builder needs. You don't have to play it that way.
+   which the builder needs. You don't have to play it that way. GOG: pass the game's folder with `--game`.
 3. Unzip `StardewVitaBuilder-linux-macos.zip` and run `bash build.sh` in the `StardewVitaBuilder` folder. It finds
    Steam (also the Flatpak and Snap versions) by itself; otherwise add `--game "<folder with Stardew Valley.exe>"`.
 4. Copy everything inside `work/out/ux0` to the Vita's `ux0:` and install `ux0:stardew.vpk`, as on Windows.
@@ -122,6 +129,12 @@ Saves folder. With Steam Cloud on, start the game once afterwards and pick the l
 Open an issue on this repository with the `ERROR:` line from the build window (or, for problems in the game,
 `ux0:data/StardewValley/vita-log.txt`).
 
+**The game closes right at the start** and `vita-log.txt` ends at a `MONO_GC_PARAMS=` line: your kubridge is too old
+(older ones lack the memory functions the game uses). Put kubridge
+[v0.3.1_hotfix](https://github.com/bythos14/kubridge/releases) in `ur0:tai/`, keep a single kubridge line under
+`*KERNEL`, and restart the Vita. If there is a `ux0:tai/config.txt`, the Vita reads that one instead of
+`ur0:tai/config.txt`: check it too.
+
 ## Contributing and license
 
 Contributions are welcome as Pull Requests to this repository. The port's own code (the builder, the patches and
@@ -143,8 +156,12 @@ parts keep their own licenses (`THIRD_PARTY.md`).
 - `vpk/pack-toolchain-zip.sh windows|linux <zip>` packs the toolchain zips (needs the AOT compiler for that system:
   `vpk/build-mono-crosswin.sh`, built in WSL with mingw-w64, or `vpk/build-mono-crosslinux.sh`, built in a Debian 11
   chroot for an old glibc); `vpk/pack-toolchain.sh` packs the WSL archive.
-- `assets/xmlserializers.bin`: the game's pregenerated XML serializers for builds outside Windows (SerializerGen
-  needs .NET Framework), encrypted with a key from the game's own `Stardew Valley.exe`. Whenever `patches/` or
-  `overlay/` change, a Windows build says so; run it once with `--save-serializers` to write a new one.
+- `assets/xmlserializers.bin` (Steam) and `assets/xmlserializers-gog.bin` (GOG): the game's pregenerated XML
+  serializers for builds outside Windows (SerializerGen needs .NET Framework), each encrypted with a key from that
+  build's own `Stardew Valley.exe`. Whenever `patches/` or `overlay/` change, a Windows build says so; run it once
+  per store with `--save-serializers` to write new ones.
+- Known game builds: `tools/known-games.json`. The GOG build is the Steam one without its Steam code, so after
+  decompiling, `patches/gog/` turns its source into Steam's before the port's own patches. The two builds then
+  produce identical output.
 - `tools/controls-art/` draws `assets/vita-controls.png` and `assets/manual-002.png`.
 - Licenses: `THIRD_PARTY.md`.

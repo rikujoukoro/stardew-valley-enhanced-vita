@@ -1,0 +1,23 @@
+diff --git a/StardewValley.Menus/TextBox.cs b/StardewValley.Menus/TextBox.cs
+index 9408f2f9d4791ab77b55c7a40240a249f2701f58..a7716878b6b5dadf4cfb86cd7fcd5ddd14c42afc 100644
+--- a/StardewValley.Menus/TextBox.cs
++++ b/StardewValley.Menus/TextBox.cs
+@@ -1,6 +1,7 @@
+ using Microsoft.Xna.Framework;
+ using Microsoft.Xna.Framework.Graphics;
+ using Microsoft.Xna.Framework.Input;
++using StardewValley.SDKs.Steam;
+ 
+ namespace StardewValley.Menus;
+ 
+@@ -86,6 +87,10 @@ public class TextBox : IKeyboardSubscriber
+ 				return;
+ 			}
+ 			_showKeyboard = false;
++			if (Program.sdk is SteamHelper { active: not false } steamHelper)
++			{
++				steamHelper.CancelKeyboard();
++			}
+ 			if (Game1.keyboardDispatcher.Subscriber == this)
+ 			{
+ 				Game1.keyboardDispatcher.Subscriber = null;

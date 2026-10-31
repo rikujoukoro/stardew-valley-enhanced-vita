@@ -1,0 +1,31 @@
+diff --git a/StardewValley/Program.cs b/StardewValley/Program.cs
+index 378e397566749289da68f8b33f5e005a72c1fb7c..e745ca0da5df2cd5bc29e59fc87e6548d160b157 100644
+--- a/StardewValley/Program.cs
++++ b/StardewValley/Program.cs
+@@ -5,7 +5,7 @@ using System.Text;
+ using System.Threading;
+ using StardewValley.Network.Compress;
+ using StardewValley.SDKs;
+-using StardewValley.SDKs.GogGalaxy;
++using StardewValley.SDKs.Steam;
+ 
+ namespace StardewValley;
+ 
+@@ -31,7 +31,7 @@ public static class Program
+ 
+ 	public static bool enableCheats = !releaseBuild;
+ 
+-	public const int buildType = 1;
++	public const int buildType = 0;
+ 
+ 	private static SDKHelper _sdk;
+ 
+@@ -53,7 +53,7 @@ public static class Program
+ 		{
+ 			if (_sdk == null)
+ 			{
+-				_sdk = new GalaxyHelper();
++				_sdk = new SteamHelper();
+ 				if (_sdk == null)
+ 				{
+ 					_sdk = new NullSDKHelper();

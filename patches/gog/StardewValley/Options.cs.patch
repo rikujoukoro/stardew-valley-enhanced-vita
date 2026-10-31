@@ -1,0 +1,23 @@
+diff --git a/StardewValley/Options.cs b/StardewValley/Options.cs
+index 0cc8f6603b5df81f53f682b8c24803ee9251f0b6..b5bd09b1f87b81a9fcc368fb39d91f040fcef49c 100644
+--- a/StardewValley/Options.cs
++++ b/StardewValley/Options.cs
+@@ -10,6 +10,7 @@ using Microsoft.Xna.Framework.Graphics;
+ using Microsoft.Xna.Framework.Input;
+ using StardewValley.BellsAndWhistles;
+ using StardewValley.Menus;
++using StardewValley.SDKs.Steam;
+ using StardewValley.SaveSerialization;
+ 
+ namespace StardewValley;
+@@ -544,6 +545,10 @@ public class Options
+ 			case ItemStowingModes.GamepadOnly:
+ 				if (gamepadControls)
+ 				{
++					if (Program.sdk is SteamHelper steamHelper && steamHelper.IsRunningOnSteamDeck() && Game1.input.GetMouseState().LeftButton == Microsoft.Xna.Framework.Input.ButtonState.Pressed)
++					{
++						return false;
++					}
+ 					return true;
+ 				}
+ 				return false;

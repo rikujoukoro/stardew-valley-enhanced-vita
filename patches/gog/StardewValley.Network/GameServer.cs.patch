@@ -1,0 +1,23 @@
+diff --git a/StardewValley.Network/GameServer.cs b/StardewValley.Network/GameServer.cs
+index d8e924ed0b43d0dbd4d2d7229d28377056d84841..c3028330fd004d0947ab8365ae7d7a9d2bf25e8a 100644
+--- a/StardewValley.Network/GameServer.cs
++++ b/StardewValley.Network/GameServer.cs
+@@ -9,6 +9,7 @@ using StardewValley.Locations;
+ using StardewValley.Menus;
+ using StardewValley.Minigames;
+ using StardewValley.Network.Dedicated;
++using StardewValley.SDKs.Steam;
+ using StardewValley.SaveSerialization;
+ 
+ namespace StardewValley.Network;
+@@ -82,6 +83,10 @@ public class GameServer : IGameServer, IBandwidthMonitor
+ 		_isLocalMultiplayerInitiatedServer = local_multiplayer;
+ 		if (!_isLocalMultiplayerInitiatedServer && Program.sdk.Networking != null)
+ 		{
++			if (Program.sdk.Networking is SteamNetHelper steamNetworking)
++			{
++				servers.Add(steamNetworking.CreateSteamServer(this));
++			}
+ 			Server sdkServer = Program.sdk.Networking.CreateServer(this);
+ 			if (sdkServer != null)
+ 			{

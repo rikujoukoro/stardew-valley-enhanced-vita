@@ -53,7 +53,7 @@ static partial class Program
 			bool vpk = !args.Contains("--no-vpk");
 			string toolchain = Arg(args, "--toolchain")?.Trim('"') ?? (vpk ? LocalToolchain() : null);
 			Step("Game: " + game);
-			Verify(game);
+			GameBuild = Verify(game);
 			if (vpk)
 			{
 				CheckToolchain(toolchain);
@@ -64,17 +64,18 @@ static partial class Program
 			{
 				Directory.Delete(src, true);
 			}
+			string bin = GameInput(game, Path.Combine(work, "game"));
 			Step("Fetching and building FNA");
 			string fna = FetchFna(Path.Combine(src, "FNA"), Path.Combine(work, "downloads"));
 			FrameworkRefs = FetchFrameworkReferences(Path.Combine(work, "downloads"), Path.Combine(work, "cache"));
 			Step("Decompiling Stardew Valley.exe");
-			Decompile(Path.Combine(game, "Stardew Valley.exe"), tree, usePdb: true, fna);
+			Decompile(Path.Combine(bin, "Stardew Valley.exe"), tree, usePdb: true, fna);
 			File.Delete(Path.Combine(tree, "Stardew Valley.csproj"));
 			foreach (string dep in Deps)
 			{
 				Step("Decompiling " + dep + ".dll");
 				string dir = Path.Combine(tree, "Deps", dep);
-				Decompile(Path.Combine(game, dep + ".dll"), dir, usePdb: false, fna);
+				Decompile(Path.Combine(bin, dep + ".dll"), dir, usePdb: false, fna);
 				File.Delete(Path.Combine(dir, dep + ".csproj"));
 				if (dep == "Lidgren.Network")
 				{
@@ -92,9 +93,18 @@ static partial class Program
 				return 0;
 			}
 			Step("Applying patches");
+			if (GameBuild.Prepatches != null)
+			{
+				// Another store's build of the same game: first into the source the Steam build decompiles to.
+				ApplyAll(Path.Combine(Repo, "patches", GameBuild.Prepatches), tree);
+			}
 			foreach (string rel in File.ReadAllLines(Path.Combine(Repo, "patches", "game.deleted.txt")).Where(l => l.Trim() != ""))
 			{
-				File.Delete(Path.Combine(tree, rel.Trim()));
+				// Exists: the GOG build lacks the Steam-only files.
+				if (File.Exists(Path.Combine(tree, rel.Trim())))
+				{
+					File.Delete(Path.Combine(tree, rel.Trim()));
+				}
 			}
 			ApplyAll(Path.Combine(Repo, "patches", "game"), tree);
 			foreach (string dep in Deps)
@@ -113,7 +123,7 @@ static partial class Program
 			{
 				File.Delete(Path.Combine(outDir, "stardew.vpk"));
 			}
-			Build(tree, game, outDir, args.Contains("--save-serializers"));
+			Build(tree, bin, outDir, args.Contains("--save-serializers"));
 			Stage(tree, game, fna, GameData(outDir), Path.Combine(outDir, "sce_sys"), Path.Combine(work, "cache"));
 			List<string> farms = args.Contains("--no-saves") ? new List<string>() : CopySaves(Arg(args, "--saves")?.Trim('"'), GameData(outDir));
 			if (vpk)
@@ -249,7 +259,50 @@ static partial class Program
 
 	// --- Finding and verifying the game ---
 
+	// The game folders to try, in this order: a "Stardew Valley" folder put into the builder's folder (or the one
+	// above, as for the toolchain zip), Steam's libraries, then GOG Galaxy's install. The first one that is a known
+	// build wins; if none is, the first one found, so Verify says what is wrong with it.
 	static string FindGame()
+	{
+		var found = new List<string>();
+		foreach (string dir in new[] { Repo, Path.GetDirectoryName(Repo) })
+		{
+			if (dir != null)
+			{
+				found.Add(Path.Combine(dir, "Stardew Valley"));
+			}
+		}
+		found.AddRange(SteamGames());
+		found.AddRange(GogGames());
+		found = found.Where(d => File.Exists(Path.Combine(d, "Stardew Valley.exe"))).Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+		if (found.Count == 0)
+		{
+			throw new BuildException("Stardew Valley not found in your Steam libraries or GOG Galaxy. Copy your game folder (the one with"
+				+ " Stardew Valley.exe) into this folder as \"Stardew Valley\", or pass --game \"<folder with Stardew Valley.exe>\".");
+		}
+		return found.FirstOrDefault(d => MatchBuild(d, new List<string>()) != null) ?? found[0];
+	}
+
+	// GOG Galaxy writes each game's folder to the registry (1453375253 is Stardew Valley's GOG id).
+	static IEnumerable<string> GogGames()
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			yield break;
+		}
+		foreach (string keyPath in new[] { @"SOFTWARE\WOW6432Node\GOG.com\Games\1453375253", @"SOFTWARE\GOG.com\Games\1453375253" })
+		{
+			using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(keyPath);
+			if (key?.GetValue("path") is string path)
+			{
+				yield return path;
+			}
+		}
+		yield return @"C:\Program Files (x86)\GOG Galaxy\Games\Stardew Valley";
+		yield return @"C:\GOG Games\Stardew Valley";
+	}
+
+	static IEnumerable<string> SteamGames()
 	{
 		var libraries = new List<string>();
 		if (OperatingSystem.IsWindows())
@@ -281,28 +334,22 @@ static partial class Program
 				}
 			}
 		}
-		foreach (string lib in libraries.Distinct(StringComparer.OrdinalIgnoreCase))
-		{
-			string dir = Path.Combine(lib, "steamapps", "common", "Stardew Valley");
-			if (File.Exists(Path.Combine(dir, "Stardew Valley.exe")))
-			{
-				return Path.GetFullPath(dir);
-			}
-		}
-		throw new BuildException("Stardew Valley not found in your Steam libraries. Pass --game \"<folder with Stardew Valley.exe>\".");
+		return libraries.Distinct(StringComparer.OrdinalIgnoreCase).Select(lib => Path.Combine(lib, "steamapps", "common", "Stardew Valley")).ToList();
 	}
 
-	static void Verify(string game)
+	// The verified build: its patches/<Prepatches> (null for Steam) and its XML serializer pack (keyed to its exe).
+	sealed record KnownBuild(string Name, string Prepatches, string SerializerPack);
+
+	static KnownBuild GameBuild;
+
+	// The known build whose files the folder has; null with the closest build's mismatches otherwise.
+	static KnownBuild MatchBuild(string game, List<string> closest)
 	{
-		if (!Directory.Exists(game))
-		{
-			throw new BuildException("No such folder: " + game);
-		}
 		using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(Repo, "tools", "known-games.json")));
-		var mismatches = new List<string>();
+		closest.Clear();
 		foreach (JsonElement build in doc.RootElement.GetProperty("builds").EnumerateArray())
 		{
-			mismatches.Clear();
+			var mismatches = new List<string>();
 			foreach (JsonProperty file in build.GetProperty("files").EnumerateObject())
 			{
 				string path = Path.Combine(game, file.Name);
@@ -313,14 +360,60 @@ static partial class Program
 			}
 			if (mismatches.Count == 0)
 			{
-				Step("Verified: " + build.GetProperty("name").GetString());
-				return;
+				string prepatches = build.TryGetProperty("prepatches", out JsonElement p) ? p.GetString() : null;
+				string pack = build.TryGetProperty("serializers", out JsonElement s) ? s.GetString() : "xmlserializers.bin";
+				return new KnownBuild(build.GetProperty("name").GetString(), prepatches, pack);
 			}
+			if (closest.Count == 0 || mismatches.Count < closest.Count)
+			{
+				closest.Clear();
+				closest.AddRange(mismatches);
+			}
+		}
+		return null;
+	}
+
+	static KnownBuild Verify(string game)
+	{
+		if (!Directory.Exists(game))
+		{
+			throw new BuildException("No such folder: " + game);
+		}
+		var mismatches = new List<string>();
+		KnownBuild build = MatchBuild(game, mismatches);
+		if (build != null)
+		{
+			Step("Verified: " + build.Name);
+			return build;
 		}
 		throw new BuildException("Your game files don't match Stardew Valley 1.6.15 (compatibility branch): " + string.Join(", ", mismatches)
 			+ ".\nSteam: Library > Stardew Valley > Properties > Betas > select \"compatibility\", let it update, then run this again."
+			+ "\nGOG: install the game's compatibility version (1.6.15) in GOG Galaxy."
 			+ (OperatingSystem.IsWindows() ? "" : "\nThe builder needs the game's Windows files: on Linux also set Properties > Compatibility > \"Force the use of a"
 				+ " specific Steam Play compatibility tool\" (Proton); on macOS download them with SteamCMD (see the README)."));
+	}
+
+	// The game's assemblies the build reads, copied into work/game: next to them in the game folder, other DLLs
+	// (a GOG folder can keep .NET 6 System.dll and mscorlib.dll from the store's main version) would change what the
+	// decompiler resolves and so the source the patches meet. Content stays where it is.
+	static readonly string[] GameReferences = { "GalaxyCSharp.dll", "Steamworks.NET.dll", "System.Data.HashFunction.Core.dll",
+		"System.Data.HashFunction.Interfaces.dll", "System.Data.HashFunction.xxHash.dll" };
+
+	static string GameInput(string game, string dir)
+	{
+		if (Directory.Exists(dir))
+		{
+			Directory.Delete(dir, true);
+		}
+		Directory.CreateDirectory(dir);
+		foreach (string name in new[] { "Stardew Valley.exe" }.Concat(Deps.Select(d => d + ".dll")).Concat(GameReferences))
+		{
+			if (File.Exists(Path.Combine(game, name)))
+			{
+				File.Copy(Path.Combine(game, name), Path.Combine(dir, name));
+			}
+		}
+		return dir;
 	}
 
 	static string Sha256(byte[] data)
@@ -834,14 +927,15 @@ static partial class Program
 		File.Copy(Path.Combine(tree, "bin", "Release", "net40", "FNA.dll"), Path.Combine(outDir, "FNA.dll"), true);
 	}
 
-	// --- The XML serializer pack (assets/xmlserializers.bin) for builds outside Windows ---
+	// --- The XML serializer packs (assets/xmlserializers*.bin) for builds outside Windows ---
 	//
 	// SerializerGen's output for the current patches, made on Windows with --save-serializers. It is derived from
 	// the game's types, so it is encrypted with a key from the player's own Stardew Valley.exe: only the verified
 	// game opens it. Format: "SVXS1\0\0\0", the inputs' SHA-256 (InputsHash), a 16-byte IV, the AES-256-CBC
 	// encrypted deflated file, then HMAC-SHA256 over everything before it.
 
-	static string SerializerPackPath => Path.Combine(Repo, "assets", "xmlserializers.bin");
+	// One pack per known build (each is keyed to its own exe): known-games.json "serializers".
+	static string SerializerPackPath => Path.Combine(Repo, "assets", GameBuild.SerializerPack);
 
 	static readonly byte[] PackMagic = Encoding.ASCII.GetBytes("SVXS1\0\0\0");
 
@@ -893,12 +987,12 @@ static partial class Program
 		}
 		if (!File.Exists(SerializerPackPath) || !File.ReadAllBytes(SerializerPackPath).AsSpan(8, 32).SequenceEqual(inputs))
 		{
-			Console.WriteLine("   note: assets/xmlserializers.bin is missing or older than the patches; builds outside Windows need it"
+			Console.WriteLine("   note: assets/" + GameBuild.SerializerPack + " is missing or older than the patches; builds outside Windows need it"
 				+ " (maintainers: run the builder with --save-serializers)");
 		}
 		else if (!OpenSerializerPack(game).AsSpan().SequenceEqual(generated))
 		{
-			throw new BuildException("assets/xmlserializers.bin doesn't match SerializerGen's output for the same patches.");
+			throw new BuildException("assets/" + GameBuild.SerializerPack + " doesn't match SerializerGen's output for the same patches.");
 		}
 	}
 
@@ -906,18 +1000,18 @@ static partial class Program
 	{
 		if (!File.Exists(SerializerPackPath))
 		{
-			throw new BuildException("assets/xmlserializers.bin is missing: outside Windows the builder needs it.");
+			throw new BuildException("assets/" + GameBuild.SerializerPack + " is missing: outside Windows the builder needs it.");
 		}
 		byte[] pack = File.ReadAllBytes(SerializerPackPath);
 		int body = pack.Length - 32;
 		if (pack.Length < 8 + 32 + 16 + 32 || !pack.AsSpan(0, 8).SequenceEqual(PackMagic)
 			|| !CryptographicOperations.FixedTimeEquals(HMACSHA256.HashData(PackKey(game, "mac"), pack.AsSpan(0, body)), pack.AsSpan(body)))
 		{
-			throw new BuildException("assets/xmlserializers.bin doesn't open with this game: it is damaged.");
+			throw new BuildException("assets/" + GameBuild.SerializerPack + " doesn't open with this game: it is damaged.");
 		}
 		if (!pack.AsSpan(8, 32).SequenceEqual(InputsHash()))
 		{
-			throw new BuildException("assets/xmlserializers.bin was made for other patches; it needs to be made again on Windows (--save-serializers).");
+			throw new BuildException("assets/" + GameBuild.SerializerPack + " was made for other patches; it needs to be made again on Windows (--save-serializers).");
 		}
 		using var aes = Aes.Create();
 		aes.Key = PackKey(game, "aes");
