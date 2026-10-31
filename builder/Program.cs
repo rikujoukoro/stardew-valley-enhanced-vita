@@ -29,6 +29,10 @@ static partial class Program
 
 	static string Repo;
 
+	// The repository's NuGet.config for every project the builder builds, also under a --work outside it: whatever the PC's
+	// NuGet settings say, packages come from nuget.org (with no source, restoring fails with NU1100).
+	static string RestoreConfig => "-p:RestoreConfigFile=" + Path.Combine(Repo, "NuGet.config");
+
 	static int Main(string[] args)
 	{
 		try
@@ -944,7 +948,7 @@ static partial class Program
 			File.WriteAllText(dst, text);
 		}
 		ApplyAll(Path.Combine(Repo, "patches", "fna"), dir);
-		Run("dotnet", "build", Path.Combine(dir, "FNA.NetFramework.csproj"), "-c", "Release", "-v", "q", "-nologo");
+		Run("dotnet", "build", Path.Combine(dir, "FNA.NetFramework.csproj"), "-c", "Release", "-v", "q", "-nologo", RestoreConfig);
 		return Path.Combine(dir, "bin", "Release", "net4.0", "FNA.dll");
 	}
 
@@ -976,10 +980,10 @@ static partial class Program
 			// The serializer generator reads a built game, so the first build gets an empty contract.
 			File.WriteAllText(serializers, "namespace Microsoft.Xml.Serialization.GeneratedAssembly { public class XmlSerializerContract : System.Xml.Serialization.XmlSerializerImplementation { } }\n");
 			Step("Building the game (1/2)");
-			Run("dotnet", "build", proj, "-c", "Release", "-v", "q", "-nologo", gameDir);
+			Run("dotnet", "build", proj, "-c", "Release", "-v", "q", "-nologo", RestoreConfig, gameDir);
 			Step("Generating XML serializers");
 			string gen = Path.Combine(tree, "Tools", "SerializerGen");
-			Run("dotnet", "build", Path.Combine(gen, "SerializerGen.csproj"), "-c", "Release", "-v", "q", "-nologo");
+			Run("dotnet", "build", Path.Combine(gen, "SerializerGen.csproj"), "-c", "Release", "-v", "q", "-nologo", RestoreConfig);
 			Run(Path.Combine(gen, "bin", "Release", "net48", "SerializerGen.exe"), Path.Combine(tree, "bin", "Release", "net40"), serializers);
 			CheckSerializerPack(File.ReadAllBytes(serializers), game, saveSerializers);
 		}
@@ -991,7 +995,7 @@ static partial class Program
 			File.WriteAllBytes(serializers, OpenSerializerPack(game));
 		}
 		Step("Building the game (2/2)");
-		Run("dotnet", "build", proj, "-c", "Release", "-v", "q", "-nologo", gameDir, "-p:VitaRelease=true");
+		Run("dotnet", "build", proj, "-c", "Release", "-v", "q", "-nologo", RestoreConfig, gameDir, "-p:VitaRelease=true");
 		// FNA.dll goes into the VPK, everything else into ux0:data/StardewValley (Stage).
 		Directory.CreateDirectory(outDir);
 		File.Copy(Path.Combine(tree, "bin", "Release", "net40", "FNA.dll"), Path.Combine(outDir, "FNA.dll"), true);
@@ -1121,7 +1125,7 @@ static partial class Program
 		CopyTree(Path.Combine(tree, "Content"), content);
 		// In-memory wave banks would need ~475 MB of RAM; the Vita streams them from converted banks.
 		string tool = Path.Combine(tree, "Tools", "WaveBankTool");
-		Run("dotnet", "build", Path.Combine(tool, "WaveBankTool.csproj"), "-c", "Release", "-v", "q", "-nologo");
+		Run("dotnet", "build", Path.Combine(tool, "WaveBankTool.csproj"), "-c", "Release", "-v", "q", "-nologo", RestoreConfig);
 		foreach (string bank in WaveBanks)
 		{
 			string source = Path.Combine(game, "Content", "XACT", bank);
