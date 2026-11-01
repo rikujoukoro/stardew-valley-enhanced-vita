@@ -1,5 +1,5 @@
 diff --git a/StardewValley/GameLocation.cs b/StardewValley/GameLocation.cs
-index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1785257f6 100644
+index b87ccac3b56118f7ef28bd5bb08a582a95942203..0984d462f5b99af2f5972a1e2abdadf8b3d62ae3 100644
 --- a/StardewValley/GameLocation.cs
 +++ b/StardewValley/GameLocation.cs
 @@ -212,7 +212,186 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
@@ -1487,12 +1487,13 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		Vector2 player_position;
  		if (Game1.gameMode == 3 && this == Game1.currentLocation)
  		{
-@@ -4076,15 +4738,53 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -4076,15 +4738,54 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  	}
  
  	protected virtual void updateCharacters(GameTime time)
 +	{
-+		// Port (as the Miyoo Mini port does): most of the ~100 locations have no characters; skip the timing and shouldTimePass.
++		// Port (as Producdevity's Miyoo Mini port does, https://github.com/Producdevity/stardew-valley-miyoo-mini-port):
++		// most of the ~100 locations have no characters; skip the timing and shouldTimePass.
 +		if (characters.Count == 0)
 +		{
 +			return;
@@ -1542,7 +1543,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  				if (i < characters.Count && character is Monster monster && monster.ShouldMonsterBeRemoved())
  				{
  					characters.RemoveAt(i);
-@@ -4132,21 +4832,105 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -4132,21 +4833,105 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  				temporarySprites.RemoveAt(i);
  			}
  		}
@@ -1654,7 +1655,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  	public GameLocation GetParentLocation()
  	{
  		if (parentLocationName.Value == null)
-@@ -4599,6 +5383,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -4599,6 +5384,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  		}
  		who?.leftRing.Value?.onMonsterSlay(monster, this, who);
  		who?.rightRing.Value?.onMonsterSlay(monster, this, who);
@@ -1665,7 +1666,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		if (who != null && !isHutchSlime && !isBabySlime)
  		{
  			if (who.IsLocalPlayer)
-@@ -6507,7 +7295,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -6507,7 +7296,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			if (!_madeMapModifications)
  			{
  				_madeMapModifications = true;
@@ -1677,7 +1678,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  			}
  		});
  		Microsoft.Xna.Framework.Rectangle player_bounds = Game1.player.GetBoundingBox();
-@@ -6519,6 +7310,47 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -6519,6 +7311,47 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  				Game1.player.TemporaryPassableTiles.Add(furnitureBounds);
  			}
  		}
@@ -1725,7 +1726,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  	}
  
  	protected virtual void resetLocalState()
-@@ -6584,6 +7416,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -6584,6 +7417,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			{
  				Game1.player.leftRing.Value.onNewLocation(Game1.player, this);
  			}
@@ -1733,7 +1734,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		}
  		forceViewportPlayerFollow = Map.Properties.ContainsKey("ViewportFollowPlayer");
  		lastTouchActionLocation = Game1.player.Tile;
-@@ -6855,6 +7688,11 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -6855,6 +7689,11 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  				break;
  			}
  		}
@@ -1745,7 +1746,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  	}
  
  	public LightSource getLightSource(string identifier)
-@@ -7464,7 +8302,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -7464,7 +8303,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			}
  		}
  		Tile tile = map.RequireLayer("Buildings").PickTile(new Location(tileLocation.X * 64, tileLocation.Y * 64), viewport.Size);
@@ -1754,7 +1755,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		{
  			action = doesTileHaveProperty(tileLocation.X, tileLocation.Y, "Action", "Buildings");
  		}
-@@ -10859,12 +11697,18 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -10859,12 +11698,18 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  		AmbientLocationSounds.onLocationLeave();
  		Game1.player.rightRing.Value?.onLeaveLocation(Game1.player, this);
  		Game1.player.leftRing.Value?.onLeaveLocation(Game1.player, this);
@@ -1773,7 +1774,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		Game1.temporaryContent.Unload();
  		Utility.CollectGarbage();
  	}
-@@ -12699,7 +13543,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -12699,7 +13544,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			Tile tile = map.GetLayer(layerName)?.Tiles[xTile, yTile];
  			if (tile != null)
  			{
@@ -1782,7 +1783,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  				{
  					return propertyValue;
  				}
-@@ -13110,8 +13954,16 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -13110,8 +13955,16 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  		}
  	}
  
@@ -1799,7 +1800,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		objects.Lock();
  		foreach (KeyValuePair<Vector2, Object> pair in objects.Pairs)
  		{
-@@ -13124,12 +13976,12 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -13124,12 +13977,12 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  		objects.Unlock();
  	}
  
@@ -1817,7 +1818,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		for (int j = 0; j < characters.Count; j++)
  		{
  			NPC character = characters[j];
-@@ -13139,6 +13991,44 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -13139,6 +13992,44 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  				character.performTenMinuteUpdate(timeOfDay, this);
  			}
  		}
@@ -1862,7 +1863,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		passTimeForObjects(10);
  		if (isOutdoors.Value)
  		{
-@@ -15180,11 +16070,19 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15180,11 +16071,19 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  		{
  			return;
  		}
@@ -1885,7 +1886,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  				{
  					drawWaterTile(b, x, y);
  				}
-@@ -15199,21 +16097,339 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15199,21 +16098,339 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  
  	public void drawWaterTile(SpriteBatch b, int x, int y, Color color)
  	{
@@ -2230,7 +2231,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		{
  			foreach (Building building in buildings)
  			{
-@@ -15229,18 +16445,47 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15229,18 +16446,47 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  				}
  			}
  		}
@@ -2286,7 +2287,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  					}
  				}
  			}
-@@ -15249,6 +16494,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15249,6 +16495,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  		{
  			return;
  		}
@@ -2297,7 +2298,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		Furniture.isDrawingLocationFurniture = true;
  		foreach (Furniture f in furniture)
  		{
-@@ -15320,13 +16569,20 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15320,13 +16570,20 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			}
  			if (d.itemId.Value != null)
  			{
@@ -2319,7 +2320,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  					Microsoft.Xna.Framework.Rectangle sourceRect = ((d.debrisType.Value == Debris.DebrisType.RESOURCE) ? itemData.GetSourceRect(chunk4.randomOffset) : itemData.GetSourceRect());
  					SpriteEffects spriteEffect = ((d.floppingFish.Value && chunk4.bounces % 2 == 0) ? SpriteEffects.FlipHorizontally : SpriteEffects.None);
  					b.Draw(texture, Utility.snapDrawPosition(Game1.GlobalToLocal(Game1.viewport, position5)), sourceRect, Color.White, 0f, Vector2.Zero, scale, spriteEffect, ((float)(d.chunkFinalYLevel + 32) + position5.X / 10000f) / 10000f);
-@@ -15335,11 +16591,17 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15335,11 +16592,17 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			}
  			else
  			{
@@ -2339,7 +2340,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  					b.Draw(Game1.debrisSpriteSheet, position6, sourceRect2, d.chunksColor.Value, 0f, Vector2.Zero, 4f * d.scale.Value, SpriteEffects.None, drawLayer);
  				}
  			}
-@@ -15475,16 +16737,46 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15475,16 +16738,46 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  		drawDebris(b);
  		if ((!Game1.eventUp || (currentEvent != null && currentEvent.showGroundObjects)) && objects.Length > 0)
  		{
@@ -2393,7 +2394,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  					}
  				}
  			}
-@@ -15561,6 +16853,42 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15561,6 +16854,42 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  
  	public virtual void drawAboveFrontLayer(SpriteBatch b)
  	{
@@ -2436,7 +2437,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		Vector2 tile = default;
  		for (int y = Game1.viewport.Y / 64 - 1; y < (Game1.viewport.Y + Game1.viewport.Height) / 64 + 7; y++)
  		{
-@@ -15821,7 +17149,15 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15821,7 +17150,15 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			try
  			{
  				tilesheet.ImageSource = GetSeasonalTilesheetName(tilesheet.ImageSource, GetSeasonKey());
@@ -2453,7 +2454,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  			}
  			catch (Exception exception)
  			{
-@@ -15829,7 +17165,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -15829,7 +17166,10 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  				tilesheet.ImageSource = prevImageSource;
  			}
  		}
@@ -2465,7 +2466,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  	}
  
  	public static string GetSeasonalTilesheetName(string sheet_path, string current_season)
-@@ -16816,7 +18155,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -16816,7 +18156,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			return true;
  		case 34:
  		{
@@ -2474,7 +2475,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  			{
  				Game1.log.Warn(string.Format("Location '{0}' ignored path tile index 34 (spawn tree) at position {1} because the tile has no '{2}' tile property.", NameOrUniqueName, tile, "SpawnTree"));
  				break;
-@@ -16937,7 +18276,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -16937,7 +18277,7 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  			for (int layerWidth = buildingLayer.LayerWidth; x < layerWidth; x++)
  			{
  				Tile tile = buildingLayer.Tiles[x, y];
@@ -2483,7 +2484,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  				{
  					continue;
  				}
-@@ -17067,6 +18406,11 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -17067,6 +18407,11 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  
  	protected void adjustMapLightPropertiesForLamp(int tile, int x, int y, string layer)
  	{
@@ -2495,7 +2496,7 @@ index b87ccac3b56118f7ef28bd5bb08a582a95942203..ebe94a74086eca293c317304252bc5d1
  		string tilesheet = getTileSheetIDAt(x, y, layer);
  		if (isFarmBuildingInterior())
  		{
-@@ -17208,6 +18552,12 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
+@@ -17208,6 +18553,12 @@ public class GameLocation : INetObject<NetFields>, IEquatable<GameLocation>, IAn
  
  	public bool Equals(GameLocation other)
  	{

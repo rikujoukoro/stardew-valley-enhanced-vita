@@ -212,6 +212,13 @@ Open an issue on this repository with the `ERROR:` line from the build window (o
 `*KERNEL`, and restart the Vita. If there is a `ux0:tai/config.txt`, the Vita reads that one instead of
 `ur0:tai/config.txt`: check it too.
 
+## Acknowledgments
+
+- [Producdevity](https://github.com/Producdevity) and their
+  [Stardew Valley port for the Miyoo Mini](https://github.com/Producdevity/stardew-valley-miyoo-mini-port): several of
+  the CPU and memory ideas here (among them skipping the update work of locations with no characters) come from
+  studying it, and their notes on game audio helped too. Thank you!
+
 ## Contributing and license
 
 Contributions are welcome as Pull Requests to this repository. The port's own code (the builder, the patches and
