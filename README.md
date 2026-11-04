@@ -212,6 +212,12 @@ Open an issue on this repository with the `ERROR:` line from the build window (o
 `*KERNEL`, and restart the Vita. If there is a `ux0:tai/config.txt`, the Vita reads that one instead of
 `ur0:tai/config.txt`: check it too.
 
+## Supporting the port
+
+If you'd like to support the work on the port, you can [buy me a coffee](https://buymeacoffee.com/rikujoukoro).
+It is entirely voluntary: every build and feature stays free for everyone, and support doesn't buy the game or any
+content. Please buy Stardew Valley itself first.
+
 ## Acknowledgments
 
 - [Producdevity](https://github.com/Producdevity) and their
